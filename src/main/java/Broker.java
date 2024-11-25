@@ -25,6 +25,11 @@ import java.security.SignatureException;
 import java.security.interfaces.ECPublicKey;
 import java.security.spec.KeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Scanner;
@@ -86,10 +91,19 @@ public class Broker
 	public static int P; //publicly available 
 	public static int G;
 	public static int publicValue;
+//	static String dbUrl = "jdbc:mysql://localhost:3306/userDB?useSSL=false&serverTimezone=UTC";
+//	static String dbUsername = "root";  // MySQL username
+//	static String dbPassword = "password";  // MySQL password
+    private static String dbUrl = "jdbc:mysql://localhost:3306/myDB";
+    private static String dbUsername = "root";
+    private static String dbPassword = "123";
+
+
 	
 	public static void main(String args[]) throws Exception
 	{
-		Broker broker = new Broker();		
+		Broker broker = new Broker();	
+//		Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
 //		broker.run(broker);
 		
 //		 boolean running = true;
@@ -955,18 +969,19 @@ public class Broker
 
 		case "2":
 			if(loggedIn) {
-				Scanner stocksDBScanner = new Scanner(stocksDB);
-				feedback = "\n\n";
-
-				//			File file = new File(".");
-				//			for(String fileNames : file.list()) System.out.println(fileNames);
-
-				while (stocksDBScanner.hasNextLine())
-				{
-					feedback += stocksDBScanner.nextLine() + "\n";
-				}
-
-				//			feedback = "Available stock = EMU - $1.09";
+//				Scanner stocksDBScanner = new Scanner(stocksDB);
+//				feedback = "\n\n";
+//
+//				//			File file = new File(".");
+//				//			for(String fileNames : file.list()) System.out.println(fileNames);
+//
+//				while (stocksDBScanner.hasNextLine())
+//				{
+//					feedback += stocksDBScanner.nextLine() + "\n";
+//				}
+//
+//				//			feedback = "Available stock = EMU - $1.09";
+				feedback = GetStockInfoFromDB();
 			}
 			
 			else {
@@ -1082,195 +1097,527 @@ public class Broker
 		newMessage = true;
 		sendMessage(encryptedMessage);
 	}
-	
-	private static boolean PerformBuy(String buyInfo) throws IOException {		
-		Scanner stocksDBScanner = new Scanner(stocksDB);
-		String user = "";
-		String userData = "";
-		String oldContent = "";
-		String newFileContent = "";
-		String ticker = "";
-		int lineNumber = 0;
-		int currentStockQuantity = 0;
-		int newStockQuantity = 0;
-		double totalBuyPrice = 0;
-		double unitPrice = 0;
-		double purchasePower = 0;
-		double newPurchasePower = 0;
-		boolean purchaseSuccessful = false;
-		
-		//get qty
-		int buyQuantity = Integer.parseInt(buyInfo.split(" ")[1]); //could throw numberFormatException
-		
-		//get stock unit price and balance and current quantity owned by user
-		while (stocksDBScanner.hasNextLine())
-		{
-			++lineNumber;
-			userData = stocksDBScanner.nextLine();
-			
-			if(lineNumber == 1) {
-				user = userData.split(" ")[0].split(":")[1];
-				
-				if(user.equals(currentUsername)) {
-					purchasePower = Double.parseDouble(userData.split(" ")[1].split(":")[1]);
-				}
-			}
-			
-			//get price and current quantity owned from db
-			else if(user.equals(currentUsername) && lineNumber > 2 && buyInfo.split(" ")[0].equals(userData.split("\t")[0].trim())) {
-				ticker = userData.split("\t")[0].trim();
-				unitPrice = Double.parseDouble(userData.split("\t")[1].trim().replace("$", ""));
-				currentStockQuantity = Integer.parseInt(userData.split("\t")[2].trim());
-			}
-			
-			oldContent = oldContent + userData + System.lineSeparator();
-		}
-		
-		stocksDBScanner.close();
-		
-		//get total buy price
-		totalBuyPrice = buyQuantity * unitPrice;
-		
-		//check if there is enough to purchase
-		if(totalBuyPrice <= purchasePower) {
-			newPurchasePower = purchasePower - totalBuyPrice; //charge user
-			newStockQuantity = currentStockQuantity + buyQuantity; //get the stocks
 
-			//update stock qty and purchase power for user
-//			System.out.println("balance:" + purchasePower);
-//			System.out.println(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity);
-//			System.out.println(newStockQuantity);
-			newFileContent = oldContent.replaceAll("balance:" + purchasePower, "balance:" + (newPurchasePower)).replace(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity, ticker + " \t$" +  unitPrice + " \t" + newStockQuantity);
-			FileWriter writer = new FileWriter(stocksDB);
-			writer.write(newFileContent.trim());
-			writer.close();
-			
-			purchaseSuccessful = true;
-		}
+	private static String GetStockInfoFromDB() {
+	    String feedback = "\n\n";
 
-		return purchaseSuccessful;
+	    // MySQL connection setup
+	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
+	        
+	        // SQL query to fetch the balance from the users table and stock info from the stocks table
+	        String query = "SELECT u.username, u.balance, s.ticker, s.price, s.quantity " +
+	                       "FROM users u " +
+	                       "LEFT JOIN stocks s ON u.username = s.username " +
+	                       "WHERE u.username = ?";
+	        
+	        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+	            stmt.setString(1, currentUsername);  // Set the current logged-in user's username
+	            
+	            // Execute the query
+	            try (ResultSet rs = stmt.executeQuery()) {
+	                // Check if there are results
+	                if (!rs.next()) {
+	                    feedback = "No data found for user: " + currentUsername;
+	                } else {
+	                    // Add username and balance info
+	                    String username = rs.getString("username");
+	                    String balance = rs.getString("balance");
+	                    feedback += "Username: " + username + " | Balance: " + balance + "\n";
+	                    
+	                    // Add the table headers
+	                    feedback += "Ticker\tPrice\tQuantity\n";
+	                    
+	                    // Loop through the result set and format the stock data
+	                    do {
+	                        String ticker = rs.getString("ticker");
+	                        String price = rs.getString("price");
+	                        String quantity = rs.getString("quantity");
+	                        
+	                        // Add each row in tabular form
+	                        feedback += (ticker == null ? "No stock" : ticker) + "\t" + 
+	                                    (price == null ? "$0" : price) + "\t" + 
+	                                    (quantity == null ? "0" : quantity) + "\n";
+	                    } while (rs.next());
+	                }
+	            }
+	        }
+	    } catch (SQLException e) {
+	        e.printStackTrace();
+	        feedback = "Error fetching data from the database.";
+	    }
+	    
+	    return feedback;
 	}
-	
-	private static boolean PerformSell(String sellInfo) throws IOException {		
-		Scanner stocksDBScanner = new Scanner(stocksDB);
-		String user = "";
-		String userData = "";
-		String oldContent = "";
-		String newFileContent = "";
-		String ticker = "";
-		int lineNumber = 0;
-		int currentStockQuantity = 0;
-		int newStockQuantity = 0;
-		double totalSellPrice = 0;
-		double unitPrice = 0;
-		double currentPurchasePower = 0;
-		double newPurchasePower = 0;
-		boolean saleSuccessful = false;
-		
-		//get qty
-		int saleQuantity = Integer.parseInt(sellInfo.split(" ")[1]); //could throw numberFormatException
-		
-		//get stock unit price and balance and current quantity owned by user
-		while (stocksDBScanner.hasNextLine())
-		{
-			++lineNumber;
-			userData = stocksDBScanner.nextLine();
-			
-			if(lineNumber == 1) {
-				user = userData.split(" ")[0].split(":")[1];
-				
-				if(user.equals(currentUsername)) {
-					currentPurchasePower = Double.parseDouble(userData.split(" ")[1].split(":")[1]);
-				}
-			}
-			
-			//get price and current quantity owned from db
-			else if(user.equals(currentUsername) && lineNumber > 2 && sellInfo.split(" ")[0].equals(userData.split("\t")[0].trim())) {
-				ticker = userData.split("\t")[0].trim();
-				unitPrice = Double.parseDouble(userData.split("\t")[1].trim().replace("$", ""));
-				currentStockQuantity = Integer.parseInt(userData.split("\t")[2].trim());
-			}
-			
-			oldContent = oldContent + userData + System.lineSeparator();
-		}
-		
-		stocksDBScanner.close();
-		
-		//get total sell price
-		totalSellPrice = saleQuantity * unitPrice;
-		
-		//check if there is enough to sell
-		if(currentStockQuantity >= saleQuantity) {
-			newPurchasePower = currentPurchasePower + totalSellPrice; //credit user
-			newStockQuantity = currentStockQuantity - saleQuantity; //sell the stocks
 
-			//update stock qty and purchase power for user
-			newFileContent = oldContent.replaceAll("balance:" + (currentPurchasePower), "balance:" + (newPurchasePower)).replace(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity, ticker + " \t$" +  unitPrice + " \t" + newStockQuantity);
-			FileWriter writer = new FileWriter(stocksDB);
-			writer.write(newFileContent.trim());
-			writer.close();
 	
-			saleSuccessful = true;
-		}
+//	private static boolean PerformBuy(String buyInfo) throws IOException {		
+//		Scanner stocksDBScanner = new Scanner(stocksDB);
+//		String user = "";
+//		String userData = "";
+//		String oldContent = "";
+//		String newFileContent = "";
+//		String ticker = "";
+//		int lineNumber = 0;
+//		int currentStockQuantity = 0;
+//		int newStockQuantity = 0;
+//		double totalBuyPrice = 0;
+//		double unitPrice = 0;
+//		double purchasePower = 0;
+//		double newPurchasePower = 0;
+//		boolean purchaseSuccessful = false;
+//		
+//		//get qty
+//		int buyQuantity = Integer.parseInt(buyInfo.split(" ")[1]); //could throw numberFormatException
+//		
+//		//get stock unit price and balance and current quantity owned by user
+//		while (stocksDBScanner.hasNextLine())
+//		{
+//			++lineNumber;
+//			userData = stocksDBScanner.nextLine();
+//			
+//			if(lineNumber == 1) {
+//				user = userData.split(" ")[0].split(":")[1];
+//				
+//				if(user.equals(currentUsername)) {
+//					purchasePower = Double.parseDouble(userData.split(" ")[1].split(":")[1]);
+//				}
+//			}
+//			
+//			//get price and current quantity owned from db
+//			else if(user.equals(currentUsername) && lineNumber > 2 && buyInfo.split(" ")[0].equals(userData.split("\t")[0].trim())) {
+//				ticker = userData.split("\t")[0].trim();
+//				unitPrice = Double.parseDouble(userData.split("\t")[1].trim().replace("$", ""));
+//				currentStockQuantity = Integer.parseInt(userData.split("\t")[2].trim());
+//			}
+//			
+//			oldContent = oldContent + userData + System.lineSeparator();
+//		}
+//		
+//		stocksDBScanner.close();
+//		
+//		//get total buy price
+//		totalBuyPrice = buyQuantity * unitPrice;
+//		
+//		//check if there is enough to purchase
+//		if(totalBuyPrice <= purchasePower) {
+//			newPurchasePower = purchasePower - totalBuyPrice; //charge user
+//			newStockQuantity = currentStockQuantity + buyQuantity; //get the stocks
+//
+//			//update stock qty and purchase power for user
+////			System.out.println("balance:" + purchasePower);
+////			System.out.println(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity);
+////			System.out.println(newStockQuantity);
+//			newFileContent = oldContent.replaceAll("balance:" + purchasePower, "balance:" + (newPurchasePower)).replace(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity, ticker + " \t$" +  unitPrice + " \t" + newStockQuantity);
+//			FileWriter writer = new FileWriter(stocksDB);
+//			writer.write(newFileContent.trim());
+//			writer.close();
+//			
+//			purchaseSuccessful = true;
+//		}
+//
+//		return purchaseSuccessful;
+//	}
 
-		return saleSuccessful;
+
+	private static boolean PerformBuy(String buyInfo) throws SQLException {
+	    boolean purchaseSuccessful = false;
+
+	    // Parse the buyInfo to get the stock ticker and the quantity to buy
+	    String tickerToBuy = buyInfo.split(" ")[0];
+	    int buyQuantity = Integer.parseInt(buyInfo.split(" ")[1]);
+
+	    // MySQL connection setup
+	    Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
+
+	    // Query to get the user's current balance (purchase power)
+	    String balanceQuery = "SELECT balance FROM users WHERE username = ?";
+	    PreparedStatement balanceStmt = conn.prepareStatement(balanceQuery);
+	    balanceStmt.setString(1, currentUsername); // Set the current logged-in user's username
+	    ResultSet balanceResult = balanceStmt.executeQuery();
+
+	    if (balanceResult.next()) {
+	        double purchasePower = Double.parseDouble(balanceResult.getString("balance"));
+	        
+	        // Query to get the stock unit price and the current stock quantity for the specified ticker
+	        String stockQuery = "SELECT price, quantity FROM stocks WHERE username = ? AND ticker = ?";
+	        PreparedStatement stockStmt = conn.prepareStatement(stockQuery);
+	        stockStmt.setString(1, currentUsername); // Set the current logged-in user's username
+	        stockStmt.setString(2, tickerToBuy); // Set the ticker from the buyInfo
+	        ResultSet stockResult = stockStmt.executeQuery();
+
+	        double unitPrice = 0;
+	        int currentStockQuantity = 0;
+
+	        if (stockResult.next()) {
+	            unitPrice = Double.parseDouble(stockResult.getString("price").replace("$", ""));
+	            currentStockQuantity = Integer.parseInt(stockResult.getString("quantity"));
+	        }
+
+	        // Calculate the total purchase price
+	        double totalBuyPrice = buyQuantity * unitPrice;
+
+	        // Check if the user has enough purchase power to make the purchase
+	        if (totalBuyPrice <= purchasePower) {
+	            double newPurchasePower = purchasePower - totalBuyPrice; // Deduct the purchase price from the user's balance
+	            int newStockQuantity = currentStockQuantity + buyQuantity; // Increase the stock quantity for the user
+
+	            // Update the user's balance
+	            String updateBalanceQuery = "UPDATE users SET balance = ? WHERE username = ?";
+	            PreparedStatement updateBalanceStmt = conn.prepareStatement(updateBalanceQuery);
+	            updateBalanceStmt.setDouble(1, newPurchasePower);
+	            updateBalanceStmt.setString(2, currentUsername);
+	            updateBalanceStmt.executeUpdate();
+
+	            // Update the stock quantity for the user
+	            String updateStockQuery = "UPDATE stocks SET quantity = ? WHERE username = ? AND ticker = ?";
+	            PreparedStatement updateStockStmt = conn.prepareStatement(updateStockQuery);
+	            updateStockStmt.setInt(1, newStockQuantity);
+	            updateStockStmt.setString(2, currentUsername);
+	            updateStockStmt.setString(3, tickerToBuy);
+	            updateStockStmt.executeUpdate();
+
+	            purchaseSuccessful = true; // The purchase was successful
+	        }
+	        
+		    stockResult.close();
+	    }
+
+	    // Close the database connections
+	    balanceResult.close();
+	    conn.close();
+
+	    return purchaseSuccessful;
 	}
+
+	
+//	private static boolean PerformSell(String sellInfo) throws IOException {		
+//		Scanner stocksDBScanner = new Scanner(stocksDB);
+//		String user = "";
+//		String userData = "";
+//		String oldContent = "";
+//		String newFileContent = "";
+//		String ticker = "";
+//		int lineNumber = 0;
+//		int currentStockQuantity = 0;
+//		int newStockQuantity = 0;
+//		double totalSellPrice = 0;
+//		double unitPrice = 0;
+//		double currentPurchasePower = 0;
+//		double newPurchasePower = 0;
+//		boolean saleSuccessful = false;
+//		
+//		//get qty
+//		int saleQuantity = Integer.parseInt(sellInfo.split(" ")[1]); //could throw numberFormatException
+//		
+//		//get stock unit price and balance and current quantity owned by user
+//		while (stocksDBScanner.hasNextLine())
+//		{
+//			++lineNumber;
+//			userData = stocksDBScanner.nextLine();
+//			
+//			if(lineNumber == 1) {
+//				user = userData.split(" ")[0].split(":")[1];
+//				
+//				if(user.equals(currentUsername)) {
+//					currentPurchasePower = Double.parseDouble(userData.split(" ")[1].split(":")[1]);
+//				}
+//			}
+//			
+//			//get price and current quantity owned from db
+//			else if(user.equals(currentUsername) && lineNumber > 2 && sellInfo.split(" ")[0].equals(userData.split("\t")[0].trim())) {
+//				ticker = userData.split("\t")[0].trim();
+//				unitPrice = Double.parseDouble(userData.split("\t")[1].trim().replace("$", ""));
+//				currentStockQuantity = Integer.parseInt(userData.split("\t")[2].trim());
+//			}
+//			
+//			oldContent = oldContent + userData + System.lineSeparator();
+//		}
+//		
+//		stocksDBScanner.close();
+//		
+//		//get total sell price
+//		totalSellPrice = saleQuantity * unitPrice;
+//		
+//		//check if there is enough to sell
+//		if(currentStockQuantity >= saleQuantity) {
+//			newPurchasePower = currentPurchasePower + totalSellPrice; //credit user
+//			newStockQuantity = currentStockQuantity - saleQuantity; //sell the stocks
+//
+//			//update stock qty and purchase power for user
+//			newFileContent = oldContent.replaceAll("balance:" + (currentPurchasePower), "balance:" + (newPurchasePower)).replace(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity, ticker + " \t$" +  unitPrice + " \t" + newStockQuantity);
+//			FileWriter writer = new FileWriter(stocksDB);
+//			writer.write(newFileContent.trim());
+//			writer.close();
+//	
+//			saleSuccessful = true;
+//		}
+//
+//		return saleSuccessful;
+//	}
+
+	private static boolean PerformSell(String sellInfo) throws SQLException {
+	    boolean saleSuccessful = false;
+
+	    // Parse the sellInfo to get the stock ticker and the quantity to sell
+	    String tickerToSell = sellInfo.split(" ")[0];
+	    int saleQuantity = Integer.parseInt(sellInfo.split(" ")[1]);
+
+	    // MySQL connection setup
+	    Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
+
+	    // Query to get the user's current stock quantity and unit price for the specified ticker
+	    String stockQuery = "SELECT price, quantity FROM stocks WHERE username = ? AND ticker = ?";
+	    PreparedStatement stockStmt = conn.prepareStatement(stockQuery);
+	    stockStmt.setString(1, currentUsername); // Set the current logged-in user's username
+	    stockStmt.setString(2, tickerToSell); // Set the ticker from the sellInfo
+	    ResultSet stockResult = stockStmt.executeQuery();
+
+	    if (stockResult.next()) {
+	        double unitPrice = Double.parseDouble(stockResult.getString("price").replace("$", ""));
+	        int currentStockQuantity = Integer.parseInt(stockResult.getString("quantity"));
+	        
+	        // Check if the user has enough stock to sell
+	        if (currentStockQuantity >= saleQuantity) {
+	            // Calculate the total sell price
+	            double totalSellPrice = saleQuantity * unitPrice;
+
+	            // Query to get the user's current balance
+	            String balanceQuery = "SELECT balance FROM users WHERE username = ?";
+	            PreparedStatement balanceStmt = conn.prepareStatement(balanceQuery);
+	            balanceStmt.setString(1, currentUsername); // Set the current logged-in user's username
+	            ResultSet balanceResult = balanceStmt.executeQuery();
+
+	            if (balanceResult.next()) {
+	                double currentPurchasePower = Double.parseDouble(balanceResult.getString("balance"));
+	                double newPurchasePower = currentPurchasePower + totalSellPrice; // Add the sell price to the balance
+
+	                // Update the user's balance in the users table
+	                String updateBalanceQuery = "UPDATE users SET balance = ? WHERE username = ?";
+	                PreparedStatement updateBalanceStmt = conn.prepareStatement(updateBalanceQuery);
+	                updateBalanceStmt.setDouble(1, newPurchasePower);
+	                updateBalanceStmt.setString(2, currentUsername);
+	                updateBalanceStmt.executeUpdate();
+
+	                // Update the stock quantity in the stocks table
+	                int newStockQuantity = currentStockQuantity - saleQuantity;
+	                String updateStockQuery = "UPDATE stocks SET quantity = ? WHERE username = ? AND ticker = ?";
+	                PreparedStatement updateStockStmt = conn.prepareStatement(updateStockQuery);
+	                updateStockStmt.setInt(1, newStockQuantity);
+	                updateStockStmt.setString(2, currentUsername);
+	                updateStockStmt.setString(3, tickerToSell);
+	                updateStockStmt.executeUpdate();
+
+	                saleSuccessful = true; // The sale was successful
+	            }
+	            
+	    	    balanceResult.close();
+	        }
+	    }
+
+	    // Close the database connections
+	    stockResult.close();
+	    conn.close();
+
+	    return saleSuccessful;
+	}
+
 	
 	//verifies the pin for Buy/Sell commands
-	private static boolean VerifyPin(String senderName, String decryptedCommand) throws FileNotFoundException
-	{
-		boolean isPinValid = false;
-		Scanner userDBScanner = new Scanner(userDB);
-		String userData = "";
-		String dbUser = "";
-		String dbPin = "";
-		String enteredPin = decryptedCommand.split(" ")[2];
-		
-		while (userDBScanner.hasNextLine())
-		{
-			userData = userDBScanner.nextLine();
-			dbUser = userData.split(" ")[1];
-			dbPin = new String(Base64.getDecoder().decode(userData.split(" ")[2])); //pwd is base 64 encoded
-			
-			if(dbUser.equals(currentUsername) && dbPin.equals(enteredPin)) 
-			{
-				isPinValid = true;
-				break;
-			}
-		}
-		
-		userDBScanner.close();
-		return isPinValid;
+//	private static boolean VerifyPin(String senderName, String decryptedCommand) throws FileNotFoundException
+//	{
+//		boolean isPinValid = false;
+//		Scanner userDBScanner = new Scanner(userDB);
+//		String userData = "";
+//		String dbUser = "";
+//		String dbPin = "";
+//		String enteredPin = decryptedCommand.split(" ")[2];
+//		
+//		while (userDBScanner.hasNextLine())
+//		{
+//			userData = userDBScanner.nextLine();
+//			dbUser = userData.split(" ")[1];
+//			dbPin = new String(Base64.getDecoder().decode(userData.split(" ")[2])); //pwd is base 64 encoded
+//			
+//			if(dbUser.equals(currentUsername) && dbPin.equals(enteredPin)) 
+//			{
+//				isPinValid = true;
+//				break;
+//			}
+//		}
+//		
+//		userDBScanner.close();
+//		return isPinValid;
+//	}
+
+	private static boolean VerifyPin(String senderName, String decryptedCommand) {
+	    boolean isPinValid = false;
+	    String enteredPin = decryptedCommand.split(" ")[2];
+	    
+	    // SQL query to check the user and pin in the database
+	    String query = "SELECT username, pin FROM users WHERE username = ?";
+	    
+	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
+	         PreparedStatement stmt = conn.prepareStatement(query)) {
+	        
+	        // Set the currentUsername as a parameter in the query
+	        stmt.setString(1, currentUsername);
+	        
+	        // Execute the query
+	        ResultSet rs = stmt.executeQuery();
+	        
+	        // Check if a user was found
+	        if (rs.next()) {
+	            // Get the stored username and pin
+	            String dbUser = rs.getString("username");
+	            String dbPin = rs.getString("pin");
+	            
+	            dbPin = new String(Base64.getDecoder().decode(dbPin));
+	            
+	            // Compare the username and pin
+	            if (dbUser.equals(currentUsername) && dbPin.equals(enteredPin)) {
+	                isPinValid = true;
+	            }
+	        }
+	        
+	    } catch (SQLException e) {
+	        e.printStackTrace(); // Handle any database errors
+	    }
+
+	    return isPinValid;
 	}
+
 	
 	//verifies the login password
-	private static boolean VerifyPassword(String senderName, String decryptedCommand) throws FileNotFoundException
-	{
-		Scanner userDBScanner = new Scanner(userDB);
-		boolean foundUser = false;
-		String userData = "";
-		String dbUser = "";
-		String dbPwd = "";
-		String enteredUsername = decryptedCommand.split(" ")[0];
-		String enteredPwd = decryptedCommand.split(" ")[1];
-		
-		while (userDBScanner.hasNextLine())
-		{
-			userData = userDBScanner.nextLine();
-			dbUser = userData.split(" ")[1];
-			dbPwd = new String(Base64.getDecoder().decode(userData.split(" ")[2])); //pwd is base 64 encoded
-			
-			if(dbUser.equals(enteredUsername) && dbPwd.equals(enteredPwd)) 
-			{
-				foundUser = true;
-				currentUsername = enteredUsername;
-				break;
-			}
-		}
-		
-		userDBScanner.close();
-		return foundUser;
+//	private static boolean VerifyPassword(String senderName, String decryptedCommand) throws FileNotFoundException
+//	{
+//		Scanner userDBScanner = new Scanner(userDB);
+//		boolean foundUser = false;
+//		String userData = "";
+//		String dbUser = "";
+//		String dbPwd = "";
+//		String enteredUsername = decryptedCommand.split(" ")[0];
+//		String enteredPwd = decryptedCommand.split(" ")[1];
+//		
+//		while (userDBScanner.hasNextLine())
+//		{
+//			userData = userDBScanner.nextLine();
+//			dbUser = userData.split(" ")[1];
+//			dbPwd = new String(Base64.getDecoder().decode(userData.split(" ")[2])); //pwd is base 64 encoded
+//			
+//			if(dbUser.equals(enteredUsername) && dbPwd.equals(enteredPwd)) 
+//			{
+//				foundUser = true;
+//				currentUsername = enteredUsername;
+//				break;
+//			}
+//		}
+//		
+//		userDBScanner.close();
+//		return foundUser;
+//	}
+	
+	
+	//Login authentication with DB
+	private static boolean VerifyPassword(String senderName, String decryptedCommand) {
+	    boolean foundUser = false;
+	    String enteredUsername = decryptedCommand.split(" ")[0];
+	    String enteredPwd = decryptedCommand.split(" ")[1];
+	    
+	    
+	    // SQL query to check the user in the database
+	    String query = "SELECT username, password FROM users WHERE username = ?";
+	    
+	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
+	         PreparedStatement stmt = conn.prepareStatement(query)) {
+	        
+	        // Set the entered username as a parameter in the query
+	        stmt.setString(1, enteredUsername);
+	        
+	        // Execute the query
+	        ResultSet rs = stmt.executeQuery();
+	        
+	        // Check if a user was found
+	        if (rs.next()) {
+	            // Get the stored username, password (base64 encoded)
+	            String dbUser = rs.getString("username");
+	            String dbPwdBase64 = rs.getString("password");
+	            
+	            // Decode the stored password from base64
+	            String dbPwd = new String(Base64.getDecoder().decode(dbPwdBase64));
+	            
+	            // Compare the username and password
+	            if (dbUser.equals(enteredUsername) && dbPwd.equals(enteredPwd)) {
+	                foundUser = true;
+	                currentUsername = enteredUsername; // Store the current logged-in username
+	            }
+	        }
+	        
+	    } catch (SQLException e) {
+	        e.printStackTrace(); // Handle any database errors
+	    }
+
+	    return foundUser;
 	}
+
+	
+	 // Verifies the login password using a database instead of a file
+//    private static boolean VerifyPassword(String decryptedCommand) 
+//    {
+//        boolean foundUser = false;
+//        String enteredUsername = decryptedCommand.split(" ")[0];
+//        String enteredPwd = decryptedCommand.split(" ")[1];
+//        
+//        // Database connection details
+////        String dbUrl = "jdbc:mysql://localhost:3306/yourDatabaseName"; // Replace with your DB details
+////        String dbUsername = "yourDBUsername"; // Replace with your DB username
+////        String dbPassword = "yourDBPassword"; // Replace with your DB password
+//        
+//        Connection conn = null;
+//        PreparedStatement stmt = null;
+//        ResultSet rs = null;
+//
+//        try {
+//            // Establish connection to the database
+//            conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
+//            
+//            // Prepare a SQL query to check if the user exists
+//            String sql = "SELECT username, password FROM users WHERE username = ?";
+//            stmt = conn.prepareStatement(sql);
+//            stmt.setString(1, enteredUsername);
+//            
+//            // Execute the query
+//            rs = stmt.executeQuery();
+//            
+//            // Check if the user is found
+//            if (rs.next()) {
+//                // Retrieve the username and password (base64 encoded)
+//                String dbUser = rs.getString("username");
+//                String dbPwd = rs.getString("password");
+//                
+//                // Decode the password from base64
+//                String decodedDbPwd = new String(Base64.getDecoder().decode(dbPwd));
+//                
+//                // Compare the entered password with the decoded one
+//                if (dbUser.equals(enteredUsername) && decodedDbPwd.equals(enteredPwd)) {
+//                    foundUser = true;
+//                    currentUsername = enteredUsername;
+//                }
+//            }
+//        } catch (SQLException e) {
+//            e.printStackTrace(); // Handle SQL exceptions
+//        } finally {
+//            // Close resources
+//            try {
+//                if (rs != null) rs.close();
+//                if (stmt != null) stmt.close();
+//                if (conn != null) conn.close();
+//            } catch (SQLException e) {
+//                e.printStackTrace();
+//            }
+//        }
+//        
+//        return foundUser;
+//    }
 	
 	/*
 	 * digital signature
