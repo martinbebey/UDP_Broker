@@ -11,5 +11,24 @@
 			<attribute name="module" value="true"/>
 		</attributes>
 	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/YahooFinanceAPI-3.15.0.jar">
+		<attributes>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/slf4j.simple_1.7.36.jar">
+		<attributes>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/org.slf4j.api_1.7.30.v20221112-0806.jar">
+		<attributes>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/com.fasterxml.jackson.core.jackson-databind_2.12.6.jar"/>
+	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/com.fasterxml.jackson.core.jackson-core_2.12.6.jar"/>
+	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/com.fasterxml.jackson.core.jackson-annotations_2.12.6.jar"/>
+	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/jsoup-1.18.3.jar"/>
 	<classpathentry kind="output" path=""/>
 </classpath>

@@ -42,6 +42,13 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+
+import yahoofinance.Stock;
+import yahoofinance.YahooFinance;
+
 /**
  * This is the broker program
  */
@@ -981,7 +988,7 @@ public class Broker
 //				}
 //
 //				//			feedback = "Available stock = EMU - $1.09";
-				feedback = GetStockInfoFromDB();
+				feedback = getStockInfo();
 			}
 			
 			else {
@@ -1097,57 +1104,212 @@ public class Broker
 		newMessage = true;
 		sendMessage(encryptedMessage);
 	}
+	
+//	private static String getStockInfo() throws IOException {
+//	    String feedback = "\n\n";
+//	    
+//	    // MySQL connection setup
+//	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
+//	        
+//	        // SQL query to fetch the balance from the users table and stock info from the stocks table
+//	        String query = "SELECT u.username, u.balance, s.ticker, s.price, s.quantity " +
+//	                       "FROM users u " +
+//	                       "LEFT JOIN stocks s ON u.username = s.username " +
+//	                       "WHERE u.username = ?";
+//	        
+//	        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+//	            stmt.setString(1, currentUsername);  // Set the current logged-in user's username
+//	            
+//	            // Execute the query
+//	            try (ResultSet rs = stmt.executeQuery()) {
+//	                // Check if there are results
+//	                if (!rs.next()) {
+//	                    feedback = "No data found for user: " + currentUsername;
+//	                } else {
+//	                    // Add username and balance info
+//	                    String username = rs.getString("username");
+//	                    String balance = rs.getString("balance");
+//	                    feedback += "Username: " + username + " | Balance: " + balance + "\n";
+//	                    
+//	                    // Add the table headers
+//	                    feedback += "Ticker\tPrice\tQuantity\n";
+//	                    
+//	                    // Loop through the result set and format the stock data
+//	                    do {
+//	                        String ticker = rs.getString("ticker");
+//	                        String quantity = rs.getString("quantity");
+//	                        
+//	                        if (ticker != null) {
+//	                            // Fetch the current price from Yahoo Finance
+//	                            Stock stock = YahooFinance.get(ticker);
+//	                            double currentPrice = stock.getQuote().getPrice().doubleValue();
+//	                            
+//	                            // Update the stock price in the database
+//	                            String updateQuery = "UPDATE stocks SET price = ? WHERE username = ? AND ticker = ?";
+//	                            try (PreparedStatement updateStmt = conn.prepareStatement(updateQuery)) {
+//	                                updateStmt.setDouble(1, currentPrice);
+//	                                updateStmt.setString(2, currentUsername);
+//	                                updateStmt.setString(3, ticker);
+//	                                updateStmt.executeUpdate();
+//	                            }
+//	                            
+//	                            // Add the updated stock data to the feedback
+//	                            feedback += ticker + "\t$" + currentPrice + "\t" + (quantity == null ? "0" : quantity) + "\n";
+//	                        }
+//	                    } while (rs.next());
+//	                }
+//	            }
+//	        }
+//	    } catch (SQLException e) {
+//	        e.printStackTrace();
+//	        feedback = "Error fetching data from the database.";
+//	    }
+//	    
+//	    return feedback;
+//	}
+	
+    private static String getStockInfo() throws IOException {
+        String feedback = "\n\n";
 
-	private static String GetStockInfoFromDB() {
-	    String feedback = "\n\n";
+        // MySQL connection setup
+        try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
+            
+            // SQL query to fetch the balance from the users table and stock info from the stocks table
+            String query = "SELECT u.username, u.balance, s.ticker, s.price, s.quantity " +
+                           "FROM users u " +
+                           "LEFT JOIN stocks s ON u.username = s.username " +
+                           "WHERE u.username = ?";
+            
+            try (PreparedStatement stmt = conn.prepareStatement(query)) {
+                stmt.setString(1, currentUsername);  // Set the current logged-in user's username
+                
+                // Execute the query
+                try (ResultSet rs = stmt.executeQuery()) {
+                    // Check if there are results
+                    if (!rs.next()) {
+                        feedback = "No data found for user: " + currentUsername;
+                    } else {
+                        // Add username and balance info
+                        String username = rs.getString("username");
+                        String balance = rs.getString("balance");
+                        feedback += "Username: " + username + " | Balance: " + balance + "\n";
+                        
+                        // Add the table headers
+                        feedback += "Ticker\tPrice\tQuantity\n";
+                        
+                        // Loop through the result set and format the stock data
+                        do {
+                            String ticker = rs.getString("ticker");
+                            String quantity = rs.getString("quantity");
+                            
+                            if (ticker != null) {
+                                // Fetch the current price from Yahoo Finance using jsoup
+                                double currentPrice = getStockPriceFromYahoo(ticker);
+                                System.out.println("shit " + ticker + " = " + currentPrice);
+                                
+                                // Update the stock price in the database
+                                String updateQuery = "UPDATE stocks SET price = ? WHERE username = ? AND ticker = ?";
+                                try (PreparedStatement updateStmt = conn.prepareStatement(updateQuery)) {
+                                    updateStmt.setDouble(1, currentPrice);
+                                    updateStmt.setString(2, currentUsername);
+                                    updateStmt.setString(3, ticker);
+                                    updateStmt.executeUpdate();
+                                }
+                                
+                                // Add the updated stock data to the feedback
+                                feedback += ticker + "\t$" + currentPrice + "\t" + (quantity == null ? "0" : quantity) + "\n";
+                            }
+                        } while (rs.next());
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            feedback = "Error fetching data from the database.";
+        }
+        
+        return feedback;
+    }
 
-	    // MySQL connection setup
-	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
-	        
-	        // SQL query to fetch the balance from the users table and stock info from the stocks table
-	        String query = "SELECT u.username, u.balance, s.ticker, s.price, s.quantity " +
-	                       "FROM users u " +
-	                       "LEFT JOIN stocks s ON u.username = s.username " +
-	                       "WHERE u.username = ?";
-	        
-	        try (PreparedStatement stmt = conn.prepareStatement(query)) {
-	            stmt.setString(1, currentUsername);  // Set the current logged-in user's username
-	            
-	            // Execute the query
-	            try (ResultSet rs = stmt.executeQuery()) {
-	                // Check if there are results
-	                if (!rs.next()) {
-	                    feedback = "No data found for user: " + currentUsername;
-	                } else {
-	                    // Add username and balance info
-	                    String username = rs.getString("username");
-	                    String balance = rs.getString("balance");
-	                    feedback += "Username: " + username + " | Balance: " + balance + "\n";
-	                    
-	                    // Add the table headers
-	                    feedback += "Ticker\tPrice\tQuantity\n";
-	                    
-	                    // Loop through the result set and format the stock data
-	                    do {
-	                        String ticker = rs.getString("ticker");
-	                        String price = rs.getString("price");
-	                        String quantity = rs.getString("quantity");
-	                        
-	                        // Add each row in tabular form
-	                        feedback += (ticker == null ? "No stock" : ticker) + "\t" + 
-	                                    (price == null ? "$0" : price) + "\t" + 
-	                                    (quantity == null ? "0" : quantity) + "\n";
-	                    } while (rs.next());
-	                }
-	            }
-	        }
-	    } catch (SQLException e) {
-	        e.printStackTrace();
-	        feedback = "Error fetching data from the database.";
-	    }
-	    
-	    return feedback;
-	}
+    // Method to fetch stock price from Yahoo Finance using jsoup
+    private static double getStockPriceFromYahoo(String ticker) {
+        double price = 0.0;
+
+        try {
+            // Fetch the HTML page for the given stock ticker
+            String url = "https://finance.yahoo.com/quote/" + ticker;
+            Document doc = Jsoup.connect(url).get();
+            
+            // Find the stock price by selecting the appropriate HTML element
+            Element priceElement = doc.select("span[data-testid='qsp-price']").first();; //doc.select("fin-streamer[data-symbol='regularMarketPrice']").first();
+            
+            // Extract the text (price) from the element
+            if (priceElement != null) {
+                String priceText = priceElement.text();
+                price = Double.parseDouble(priceText.replaceAll(",", ""));
+            } else {
+                System.out.println("Could not find the price for " + ticker);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("Error fetching stock price for " + ticker);
+        }
+        
+        return price;
+    }
+
+//	private static String getStockInfo() throws IOException {
+//	    String feedback = "\n\n";
+//	    
+////	    YahooFinance.get("GOOG");
+//
+//	    // MySQL connection setup
+//	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
+//	        
+//	        // SQL query to fetch the balance from the users table and stock info from the stocks table
+//	        String query = "SELECT u.username, u.balance, s.ticker, s.price, s.quantity " +
+//	                       "FROM users u " +
+//	                       "LEFT JOIN stocks s ON u.username = s.username " +
+//	                       "WHERE u.username = ?";
+//	        
+//	        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+//	            stmt.setString(1, currentUsername);  // Set the current logged-in user's username
+//	            
+//	            // Execute the query
+//	            try (ResultSet rs = stmt.executeQuery()) {
+//	                // Check if there are results
+//	                if (!rs.next()) {
+//	                    feedback = "No data found for user: " + currentUsername;
+//	                } else {
+//	                    // Add username and balance info
+//	                    String username = rs.getString("username");
+//	                    String balance = rs.getString("balance");
+//	                    feedback += "Username: " + username + " | Balance: " + balance + "\n";
+//	                    
+//	                    // Add the table headers
+//	                    feedback += "Ticker\tPrice\tQuantity\n";
+//	                    
+//	                    // Loop through the result set and format the stock data
+//	                    do {
+//	                        String ticker = rs.getString("ticker");
+//	                        String price = rs.getString("price");
+//	                        String quantity = rs.getString("quantity");
+//	                        
+//	                        // Add each row in tabular form
+//	                        feedback += (ticker == null ? "No stock" : ticker) + "\t" + 
+//	                                    (price == null ? "$0" : price) + "\t" + 
+//	                                    (quantity == null ? "0" : quantity) + "\n";
+//	                    } while (rs.next());
+//	                }
+//	            }
+//	        }
+//	    } catch (SQLException e) {
+//	        e.printStackTrace();
+//	        feedback = "Error fetching data from the database.";
+//	    }
+//	    
+//	    return feedback;
+//	}
 
 	
 //	private static boolean PerformBuy(String buyInfo) throws IOException {		
