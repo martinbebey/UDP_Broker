@@ -1,14 +1,9 @@
 package src.main.java;
 
-import java.io.Console;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -22,7 +17,6 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.SignatureException;
-import java.security.interfaces.ECPublicKey;
 import java.security.spec.KeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.sql.Connection;
@@ -32,22 +26,15 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Scanner;
 import java.util.concurrent.ThreadLocalRandom;
-
 import javax.crypto.Cipher;
-//import javax.crypto.KeyGenerator;
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-
-import yahoofinance.Stock;
-import yahoofinance.YahooFinance;
 
 /**
  * This is the broker program
@@ -55,30 +42,26 @@ import yahoofinance.YahooFinance;
 public class Broker 
 {
 	private static DatagramSocket socket;
-	private boolean running;
 	private static byte[] buf = new byte[5000];
 	private static byte[] buffer = new byte[5000];
 	private static int port = 0;
+	private static int datagramSocketPortNumber = 5000;
 	private static long averageEncryptionTime;
 	private static long averagePacketSentSize;
 	private static long averagePacketReceivedSize;
 	private static long encryptionCount = 0;
 	private static long averageDecryptionTime;
 	private static long decryptionCount = 0;
-	private static long numberOfMessagesSent = 0;
 	private static InetAddress address;
-	
 	private static String encryptedMessage = "message";
 	private static byte[] initVector;
 	private static SecretKey key = null;
-	private static String cipherBlockChainKey;// = "masterkey694";
-	//private final static int KEY_SIZE = 128;
+	private static String cipherBlockChainKey;
 	private final static int DATA_LENGTH = 128;
-	private static int privateValue; //a and b
+	private static int privateValue; //used for DH key exchange
 	private static int symmetricKey;
 	private static Cipher encryptionCipher = null;
-	private static byte[] HMAC_KEY;// = { 0x60, 0x51, 0x41, 0x30, 0x20, 0x11, 0x04, 0x70 }; //pre-shared between clients
-//	private AuthenticatorNode authenticator = null;
+	private static byte[] HMAC_KEY;
 	private static PrivateKey privateKeyDS = null; //private/public keys used to sign/authenticate with DSA
 	private static KeyPairGenerator keyPairGen = null; //key pair generator object
 	private static KeyPair pair = null;
@@ -88,57 +71,28 @@ public class Broker
 	private static boolean buyingStock;
 	private static boolean sellingStock = false;
 	private static String currentUsername = "";
-	private static File stocksDB = new File("C:\\Users\\betoc\\eclipse-workspace\\UdpBroker\\src\\main\\java\\stocks.txt"); //("C:\\Apps\\Eclipse_Neon\\Workspace\\Networking\\src\\stocks.txt");
-	private static File userDB = new File("C:\\Users\\betoc\\eclipse-workspace\\UdpBroker\\src\\main\\java\\userDB.txt");
 	public static PublicKey publicKeyDS = null;
 	public static 	byte[] hmacSignature;
 	public static byte[] messageDigitalSignature = null;
 	public static String clientName = "Broker";
 	public static boolean newMessage = false;
-	public static int P; //publicly available 
-	public static int G;
+	public static int P; //used for DH key exchange
+	public static int G; //used for DH key exchange
 	public static int publicValue;
-//	static String dbUrl = "jdbc:mysql://localhost:3306/userDB?useSSL=false&serverTimezone=UTC";
-//	static String dbUsername = "root";  // MySQL username
-//	static String dbPassword = "password";  // MySQL password
     private static String dbUrl = "jdbc:mysql://localhost:3306/myDB";
     private static String dbUsername = "root";
     private static String dbPassword = "123";
 
 
-	
+	/**
+	 * Broker program's entry point. Infinitely loops listening to client commands, decrypts and processes them
+	 * then sends an encrypted response
+	 * @throws Exception
+	 */
 	public static void main(String args[]) throws Exception
 	{
-		Broker broker = new Broker();	
-//		Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
-//		broker.run(broker);
-		
-//		 boolean running = true;
-//
-//	        while (running) {
-//	            DatagramPacket packet 
-//	              = new DatagramPacket(buf, buf.length);
-//	            socket.receive(packet);
-//	            
-//	            InetAddress address = packet.getAddress();
-//	            int port = packet.getPort();
-//	            packet = new DatagramPacket(buf, buf.length, address, port);
-//	            String received 
-//	              = new String(packet.getData(), 0, packet.getLength());
-//	            System.out.println(received);
-//	            if (received.equals("end")) {
-//	                running = false;
-//	                continue;
-//	            }
-//	            socket.send(packet);
-//	        }
-//	        socket.close();
-		
+		socket = new DatagramSocket(datagramSocketPortNumber);		
 		boolean running = true;
-		
-		//generated at random
-//		P = ThreadLocalRandom.current().nextInt(3,34);
-//		G = ThreadLocalRandom.current().nextInt(2,9);
 		
 		//P & G for DH 
 		DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -151,6 +105,7 @@ public class Broker
 		socket.send(packet);
 		buf = new byte[5000];
 		
+		//get G
 		packet = new DatagramPacket(buf, buf.length);
 		socket.receive(packet);
 		address = packet.getAddress();
@@ -161,10 +116,7 @@ public class Broker
 		socket.send(packet);
 		buf = new byte[5000];
 		
-//		System.out.println("P value: " + P);
-//		System.out.println("G value: " + G);
-		
-		//generate keys
+		//generate of keys for HMAC, CCMP, AES-GCM and broker's Digital Signature
 		for(int i = 0; i < 3; ++i)
 		{			
 			setPrivateValue();
@@ -177,18 +129,6 @@ public class Broker
 			port = packet.getPort();
 			packet = new DatagramPacket(buf, buf.length, address, port);
 			received = new String(packet.getData(), 0, packet.getLength());
-
-//			if (received.equals("end")) 
-//			{
-//				running = false;
-//				continue;
-//			}
-			
-//			System.out.println("public value received from client: " + received);
-			
-//			socket.send(packet);
-			
-			//exchange public values
 			int clientPublicValue = Integer.parseInt(received.trim());
 			
 			sendPublicValue(Integer.toString(publicValue));//broker send public value to client
@@ -219,19 +159,10 @@ public class Broker
 			InetAddress address = packet.getAddress();
 			port = packet.getPort();
 			packet = new DatagramPacket(buffer, buffer.length, address, port);
-//			int bufferLength = packet.getLength();
-//			System.out.println("broker length" + bufferLength);
 			received = new String(packet.getData(), 0, packet.getLength());
 			System.out.println("Receiving packet of size: " + packet.getLength());
 			averagePacketReceivedSize += packet.getLength();
-			System.out.println("Average size of packets received: " + averagePacketReceivedSize);
-
-//			if (received.equals("end")) 
-//			{
-//				running = false;
-//				continue;
-//			}
-			
+			System.out.println("Average size of packets received: " + averagePacketReceivedSize);	
 			System.out.println(received);
 			
 			//breakdown response
@@ -241,126 +172,31 @@ public class Broker
 			byte[] userDigitalSignature = Base64.getDecoder().decode(received.split("\\|")[3].getBytes());
 			System.out.println("received iv string: " + received.split("\\|")[5].trim().substring(0, 16));
 			initVector = Base64.getDecoder().decode(received.split("\\|")[5].trim().substring(0, 16).getBytes());
-//			System.out.println("received iv in bytes: " + initVector);
-//			System.out.println(clientName + " received encrypted message: " + encryptedResponse);
 			System.out.println(clientName + " received HMAC signature: " + received.split("\\|")[2]);
-			System.out.println(clientName + " received DS signature: " + received.split("\\|")[3]);
-			
+			System.out.println(clientName + " received DS signature: " + received.split("\\|")[3]);	
 			KeyFactory factory = KeyFactory.getInstance("DSA");
 			String keyString = received.split("\\|")[4];
-//			System.out.println("####################################################" + keyString);
 			byte[] keyByte = Base64.getDecoder().decode(keyString.trim());
 			PublicKey brokerPublicKeyDS = (PublicKey) factory.generatePublic(new X509EncodedKeySpec(keyByte));
 			
 			//process response
 			ProcessResponse(encryptedResponse, senderName, userHMACSignature, userDigitalSignature, brokerPublicKeyDS);
-			
-//			socket.send(packet);
 		}
 
-		closeSocket();
+		socket.close();
 	}
-
-	public Broker() throws SocketException 
-	{
-		socket = new DatagramSocket(5000);
-	}
-
-//	public void run(Broker broker) throws Exception
-//	{
-//		running = true;
-//		
-//		//generated at random
-//		P = ThreadLocalRandom.current().nextInt(3,34);
-//		G = ThreadLocalRandom.current().nextInt(2,9);
-//		
-//		for(int i = 0; i < 3; ++i)
-//		{			
-//			setPrivateValue();
-//			setPublicValue();
-//			
-//
-//			DatagramPacket packet = new DatagramPacket(buf, buf.length);
-//			socket.receive(packet);
-//			address = packet.getAddress();
-//			port = packet.getPort();
-//			packet = new DatagramPacket(buf, buf.length, address, port);
-//			String received = new String(packet.getData(), 0, packet.getLength());
-//
-////			if (received.equals("end")) 
-////			{
-////				running = false;
-////				continue;
-////			}
-//			
-//			System.out.println(received);
-//			
-////			socket.send(packet);
-//			
-//			//exchange public values
-//			int clientPublicValue = Integer.parseInt(received.trim());
-//			
-//			System.out.println("public value from client: " + publicValue);
-//			sendPublicValue(Integer.toString(publicValue));//broker send public value to client
-//			System.out.println("public value from boker: " + publicValue);
-//			
-//			publicValue = clientPublicValue;
-//			
-//			setSymmetricKey();
-//			setHMACKey();
-//			setCipherBlockKey();
-//			GenerateAESKey();
-//		}
-//		
-//		GenerateDigitalSignature();
-//
-//		while (running) 
-//		{
-//			DatagramPacket packet = new DatagramPacket(buf, buf.length);
-//			socket.receive(packet);
-//			InetAddress address = packet.getAddress();
-//			port = packet.getPort();
-//			packet = new DatagramPacket(buf, buf.length, address, port);
-//			int bufferLength = packet.getLength();
-//			System.out.println("broker length" + bufferLength);
-//			String received = new String(packet.getData(), 0, packet.getLength());
-//
-//			if (received.equals("end")) 
-//			{
-//				running = false;
-//				continue;
-//			}
-//			
-//			System.out.println(received);
-//			
-//			//breakdown response
-//			String encryptedResponse = received.split("|")[0];
-//			String senderName = received.split("|")[1];
-//			byte[] brokerHMACSignature = received.split("|")[2].getBytes();
-//			byte[] brokerDigitalSignature = received.split("|")[3].getBytes();
-//			
-//			KeyFactory factory = KeyFactory.getInstance("DSA", "BC");
-//			PublicKey brokerPublicKeyDS = (ECPublicKey) factory.generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(received.split("|")[4])));
-//			
-//			//process response
-//			ProcessResponse(encryptedResponse, senderName, brokerHMACSignature, brokerDigitalSignature, brokerPublicKeyDS);
-//			
-////			socket.send(packet);
-//		}
-//
-//		closeSocket();
-//	}
 	
+	/**
+	 * Shares the public value with the connected client.
+	 * @param msg the message to be included in the packet to be sent to the client. 
+	 * In this case, it is the public value used for DH key exchange
+	 * @throws IOException
+	 */
 	public static void sendPublicValue(String msg) throws IOException 
 	{
 		buf = msg.getBytes();
 		DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
 		socket.send(packet);
-//		packet = new DatagramPacket(buf, buf.length);
-//		socket.receive(packet);
-//		String received = new String(packet.getData(), 0, packet.getLength());
-//		System.out.println(received);
-//		return received;
 	}
 	
 	/**
@@ -370,7 +206,6 @@ public class Broker
 	 */
 	public static void sendMessage(String msg) throws IOException 
 	{
-		++numberOfMessagesSent;
 		msg = buildMessage(msg);
 		buf = new byte[5000];
 		buf = msg.getBytes();
@@ -402,12 +237,11 @@ public class Broker
 		
 		return msg + "|" + clientName + "|" + str_hmacSignature + "|" + str_messageDS + "|" + str_publicKeyDS + "|" + initializationVector;
 	}
-
-	public static void closeSocket() 
-	{
-		socket.close();
-	}
 	
+	/**
+	 * Generates the broker's digital signature to be attached to every message
+	 * @throws IOException
+	 */
 	private static void GenerateDigitalSignature() throws NoSuchAlgorithmException, InvalidKeyException
 	{
 		keyPairGen = KeyPairGenerator.getInstance("DSA"); //Creating KeyPair generator object
@@ -419,18 +253,20 @@ public class Broker
 		digitalSignature.initSign(privateKeyDS); //Initialize the signature
 	}
 
+	/**
+	 * Verifies the digital signature of the received message.
+	 * @param input - the input message in bytes
+	 * @param signatureToVerify - the client's signature to verify
+	 * @param pubKey - the public key used
+	 * @throws IOException
+	 */
 	public static boolean Verify_Digital_Signature(byte[] input, byte[] signatureToVerify, PublicKey key) throws Exception
 	{ 
 		Signature signature = Signature.getInstance("SHA256withDSA"); 
 		signature.initVerify(key); 
 		signature.update(input); 
 		return signature.verify(signatureToVerify); 
-	} 
-
-//	public void setAuthenticator(AuthenticatorNode auth)
-//	{
-//		this.authenticator = auth;
-//	}
+	}
 
 	/**
 	 * sets the value of P and G used to compute the public value
@@ -443,38 +279,53 @@ public class Broker
 		G = g;
 	}
 
+	/**
+	 * Randomly generates the private value between 2 and 257.
+	 */
 	public static void setPrivateValue() 
 	{
 		privateValue = ThreadLocalRandom.current().nextInt(2,257);
 	}
 
+	/**
+	 * Sets the cypher block key used for CCMP encryption.
+	 */
 	public static void setCipherBlockKey()
 	{
-//		System.out.println("sym key = " + symmetricKey);
 		cipherBlockChainKey = Integer.toString(symmetricKey);
 	}
 
+	/**
+	 * Sets the hmac key used to produce the hmac signature.
+	 */
 	public static void setHMACKey()
 	{
 		HMAC_KEY = ByteBuffer.allocate(8).putInt(symmetricKey).array();
 	}
 
+	/**
+	 *Sets the public value shared with the client based on the values of P and G.
+	 */
 	public static void setPublicValue()
 	{
 		publicValue = calculateValue(G, privateValue, P);
 	}
 
-	//	public int getPublicValue()
-	//	{
-	//		return publicValue;
-	//	}
-
+	/**
+	 * Sets the symmetric keys obtained via DH exchange that will be secret between the
+	 * client and the broker.
+	 */
 	public static void setSymmetricKey()
 	{
 		symmetricKey = calculateValue(publicValue, privateValue, P);
 	}
 
-	//method to find the value of G ^ a mod P  for DH key exchange
+	/**
+	 * Method to find the value of G ^ [power] mod P  for DH key exchange.
+	 * @param P
+	 * @param G
+	 * @param power - the power to which G will be raised in the formula
+	 */
 	private static  int calculateValue(int G, int power, int P)  
 	{  
 		int result = 0;
@@ -491,6 +342,12 @@ public class Broker
 		}  
 	}
 
+	/**
+	 * Adds the borker's HMAC signature to the message.
+	 * @param encryptedMessage - the message to be signed
+	 * @throws NoSuchAlgorithmException
+	 * @throws InvalidKeyException
+	 */
 	private static void HMAC_Sign(String encryptedMessage) throws NoSuchAlgorithmException, InvalidKeyException
 	{
 		Mac mac = Mac.getInstance("HmacSHA256");
@@ -499,7 +356,6 @@ public class Broker
 		mac.update(encryptedMessage.getBytes());
 		hmacSignature = mac.doFinal();
 		System.out.println("HMAC signature applied to message: " + hmacSignature);
-
 	}
 
 	/**
@@ -531,14 +387,13 @@ public class Broker
 	}
 
 	/**
-	 * AES-GCM encryption
+	 * AES-GCM encryption.
 	 * @param message
 	 * @return encrypted data as a string
 	 * @throws Exception
 	 */
 	public static String Encrypt(String message) throws Exception
 	{		
-		//GenerateAESKey();
 		String encryptedData = encrypt(message);
 
 		System.out.println("Message AES-GCM encrypted by " + clientName + ": " + encryptedData);
@@ -546,7 +401,11 @@ public class Broker
 		return encryptedData;
 	}
 
-	//AES-GCM encryption
+	/**
+	 * Performs the AES-GCM encryption.
+	 * @param data - the data to be encrypted
+	 * @throws Exception
+	 */
 	public static String encrypt(String data) throws Exception 
 	{
 		byte[] dataInBytes = data.getBytes();
@@ -556,10 +415,13 @@ public class Broker
 		return encode(encryptedBytes);
 	}
 
-	//AES-GCM decryption
+	/**
+	 * Performs the AES-GCM decryption.
+	 * @param encryptedData - the data to be decrypted
+	 * @throws Exception
+	 */
 	public static String decrypt(String encryptedData) throws Exception 
-	{
-        
+	{     
 		byte[] dataInBytes = decode(encryptedData);
 		Cipher decryptionCipher = Cipher.getInstance("AES/GCM/NoPadding");
 		GCMParameterSpec spec = new GCMParameterSpec(DATA_LENGTH, initVector);
@@ -570,6 +432,12 @@ public class Broker
 		return new String(decryptedBytes);
 	}
 
+	/**
+	 * Performs the CCMP encryption.
+	 * @param plaintext - the message to be encrypted
+	 * @param key - the key used for the cipher encryption
+	 * @throws Exception
+	 */
 	public static String CCMP_Encrypt(String plaintext, String key) throws Exception 
 	{
 		// Generate a 256-bit key from the given encryption key
@@ -594,6 +462,12 @@ public class Broker
 		return Base64.getEncoder().encodeToString(encryptedBytes);
 	}
 
+	/**
+	 * Performs the CCMP decryption.
+	 * @param ciphertext - the message to be decrypted
+	 * @param key - the key used for the cipher decryption
+	 * @throws Exception
+	 */
 	public static String CCMP_Decrypt(String ciphertext, String key) throws Exception {
 		// Generate a 256-bit key from the given decryption key
 		byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
@@ -618,14 +492,9 @@ public class Broker
 		//encode(decryptedBytes);
 		return new String(decryptedBytes, StandardCharsets.UTF_8);
 	}
-
-//	public String getMessage()
-//	{
-//		this.newMessage = false;
-//		return encryptedMessage;
-//	}
 	
-	/******************** below are different versions of the same method used to perform the decryptions in different orders ***************************/
+	/******************** Below are different versions of the same method used to perform the decryptions in different orders. The order of decryption is commented on top of each method, 
+	 * where GHC stands for (GCM decryption, followed by HMAC verification, followed by CCMP decryption). Note that the message would have to have been encrypted in the opposite order by the client who sent it. ***************************/
 
 	//GHC
 //	public static void ProcessResponse(String message, String senderName, byte[] hmacSignature, byte[] messageSignature, PublicKey pubKey) throws Exception
@@ -645,8 +514,6 @@ public class Broker
 //			
 //			decryptedData = decrypt(message);
 //
-//
-//
 //			if(isMessageAuthentic(decryptedData, hmacSignature))
 //			{				
 //				message = CCMP_Decrypt(decryptedData, cipherBlockChainKey);
@@ -660,9 +527,6 @@ public class Broker
 //				System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
 //
 //				System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
-//
-////				PrintWriter chatScreen = new PrintWriter(socket.getOutputStream(), true);
-////				chatScreen.println(senderName + ": " + decryptedData);
 //			}
 //
 //			else
@@ -713,9 +577,6 @@ public class Broker
 //				System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
 //				
 //				System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
-//
-////				PrintWriter chatScreen = new PrintWriter(socket.getOutputStream(), true);
-////				chatScreen.println(senderName + ": " + decryptedData);
 //			}
 //
 //			else
@@ -756,7 +617,6 @@ public class Broker
 //				System.out.println("Decrypted Cipher Block Chain: " + message);
 //				decryptedData = decrypt(message);
 //
-//
 //				if(isMessageAuthentic(decryptedData, hmacSignature))
 //				{				
 //					
@@ -769,9 +629,6 @@ public class Broker
 //					System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
 //					
 //					System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
-//
-////					PrintWriter chatScreen = new PrintWriter(socket.getOutputStream(), true);
-////					chatScreen.println(senderName + ": " + decryptedData);
 //				}
 //
 //				else
@@ -810,8 +667,6 @@ public class Broker
 				message = CCMP_Decrypt(message, cipherBlockChainKey);
 				System.out.println("Decrypted Cipher Block Chain: " + message);
 
-
-
 				if(isMessageAuthentic(message, hmacSignature))
 				{	
 					decryptedData = decrypt(message);					
@@ -821,9 +676,6 @@ public class Broker
 					System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
 					
 					System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
-
-//					PrintWriter chatScreen = new PrintWriter(socket.getOutputStream(), true);
-//					chatScreen.println(senderName + ": " + decryptedData);
 				}
 
 				else
@@ -875,9 +727,6 @@ public class Broker
 //					System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
 //					
 //					System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
-//
-////					PrintWriter chatScreen = new PrintWriter(socket.getOutputStream(), true);
-////					chatScreen.println(senderName + ": " + decryptedData);
 //				}
 //
 //				else
@@ -929,9 +778,6 @@ public class Broker
 //				System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
 //				
 //				System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
-//
-////				PrintWriter chatScreen = new PrintWriter(socket.getOutputStream(), true);
-////				chatScreen.println(senderName + ": " + decryptedData);
 //			}
 //
 //			else
@@ -953,9 +799,9 @@ public class Broker
 //	}
 
 	/**
-	 * processes the user's command. This command is obtained from decrypting the message included in
+	 * Processes the user's command. This command is obtained from decrypting the message included in
 	 * the packet received from the client.
-	 * @param decryptedCommand
+	 * @param decryptedCommand - the decrypted command to be processed
 	 * @throws Exception 
 	 * @throws NoSuchAlgorithmException 
 	 * @throws InvalidKeyException 
@@ -966,8 +812,6 @@ public class Broker
 
 		switch(decryptedCommand)
 		{
-//		case "0":
-//			break;
 
 		case "1":
 			logingIn = true;
@@ -976,18 +820,6 @@ public class Broker
 
 		case "2":
 			if(loggedIn) {
-//				Scanner stocksDBScanner = new Scanner(stocksDB);
-//				feedback = "\n\n";
-//
-//				//			File file = new File(".");
-//				//			for(String fileNames : file.list()) System.out.println(fileNames);
-//
-//				while (stocksDBScanner.hasNextLine())
-//				{
-//					feedback += stocksDBScanner.nextLine() + "\n";
-//				}
-//
-//				//			feedback = "Available stock = EMU - $1.09";
 				feedback = getStockInfo();
 			}
 			
@@ -1032,7 +864,7 @@ public class Broker
 					feedback = "Login Successful!";
 					loggedIn = true;
 				}
-//				
+			
 				else
 				{
 					System.out.println(clientName + " message: Password authentication failed. Login unsuccessful");
@@ -1105,69 +937,10 @@ public class Broker
 		sendMessage(encryptedMessage);
 	}
 	
-//	private static String getStockInfo() throws IOException {
-//	    String feedback = "\n\n";
-//	    
-//	    // MySQL connection setup
-//	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
-//	        
-//	        // SQL query to fetch the balance from the users table and stock info from the stocks table
-//	        String query = "SELECT u.username, u.balance, s.ticker, s.price, s.quantity " +
-//	                       "FROM users u " +
-//	                       "LEFT JOIN stocks s ON u.username = s.username " +
-//	                       "WHERE u.username = ?";
-//	        
-//	        try (PreparedStatement stmt = conn.prepareStatement(query)) {
-//	            stmt.setString(1, currentUsername);  // Set the current logged-in user's username
-//	            
-//	            // Execute the query
-//	            try (ResultSet rs = stmt.executeQuery()) {
-//	                // Check if there are results
-//	                if (!rs.next()) {
-//	                    feedback = "No data found for user: " + currentUsername;
-//	                } else {
-//	                    // Add username and balance info
-//	                    String username = rs.getString("username");
-//	                    String balance = rs.getString("balance");
-//	                    feedback += "Username: " + username + " | Balance: " + balance + "\n";
-//	                    
-//	                    // Add the table headers
-//	                    feedback += "Ticker\tPrice\tQuantity\n";
-//	                    
-//	                    // Loop through the result set and format the stock data
-//	                    do {
-//	                        String ticker = rs.getString("ticker");
-//	                        String quantity = rs.getString("quantity");
-//	                        
-//	                        if (ticker != null) {
-//	                            // Fetch the current price from Yahoo Finance
-//	                            Stock stock = YahooFinance.get(ticker);
-//	                            double currentPrice = stock.getQuote().getPrice().doubleValue();
-//	                            
-//	                            // Update the stock price in the database
-//	                            String updateQuery = "UPDATE stocks SET price = ? WHERE username = ? AND ticker = ?";
-//	                            try (PreparedStatement updateStmt = conn.prepareStatement(updateQuery)) {
-//	                                updateStmt.setDouble(1, currentPrice);
-//	                                updateStmt.setString(2, currentUsername);
-//	                                updateStmt.setString(3, ticker);
-//	                                updateStmt.executeUpdate();
-//	                            }
-//	                            
-//	                            // Add the updated stock data to the feedback
-//	                            feedback += ticker + "\t$" + currentPrice + "\t" + (quantity == null ? "0" : quantity) + "\n";
-//	                        }
-//	                    } while (rs.next());
-//	                }
-//	            }
-//	        }
-//	    } catch (SQLException e) {
-//	        e.printStackTrace();
-//	        feedback = "Error fetching data from the database.";
-//	    }
-//	    
-//	    return feedback;
-//	}
-	
+	/**
+	 * Gets the LIVE stock information from Yahoo Finance.
+	 * @throws IOException
+	 */
     private static String getStockInfo() throws IOException {
         String feedback = "\n\n";
 
@@ -1231,7 +1004,10 @@ public class Broker
         return feedback;
     }
 
-    // Method to fetch stock price from Yahoo Finance using jsoup
+	/**
+	 * Helper function to fetch the ticker's LIVE price.
+	 * @param ticker - the ticker who's LIVE price will be fetched
+	 */
     private static double getStockPriceFromYahoo(String ticker) {
         double price = 0.0;
 
@@ -1258,129 +1034,11 @@ public class Broker
         return price;
     }
 
-//	private static String getStockInfo() throws IOException {
-//	    String feedback = "\n\n";
-//	    
-////	    YahooFinance.get("GOOG");
-//
-//	    // MySQL connection setup
-//	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
-//	        
-//	        // SQL query to fetch the balance from the users table and stock info from the stocks table
-//	        String query = "SELECT u.username, u.balance, s.ticker, s.price, s.quantity " +
-//	                       "FROM users u " +
-//	                       "LEFT JOIN stocks s ON u.username = s.username " +
-//	                       "WHERE u.username = ?";
-//	        
-//	        try (PreparedStatement stmt = conn.prepareStatement(query)) {
-//	            stmt.setString(1, currentUsername);  // Set the current logged-in user's username
-//	            
-//	            // Execute the query
-//	            try (ResultSet rs = stmt.executeQuery()) {
-//	                // Check if there are results
-//	                if (!rs.next()) {
-//	                    feedback = "No data found for user: " + currentUsername;
-//	                } else {
-//	                    // Add username and balance info
-//	                    String username = rs.getString("username");
-//	                    String balance = rs.getString("balance");
-//	                    feedback += "Username: " + username + " | Balance: " + balance + "\n";
-//	                    
-//	                    // Add the table headers
-//	                    feedback += "Ticker\tPrice\tQuantity\n";
-//	                    
-//	                    // Loop through the result set and format the stock data
-//	                    do {
-//	                        String ticker = rs.getString("ticker");
-//	                        String price = rs.getString("price");
-//	                        String quantity = rs.getString("quantity");
-//	                        
-//	                        // Add each row in tabular form
-//	                        feedback += (ticker == null ? "No stock" : ticker) + "\t" + 
-//	                                    (price == null ? "$0" : price) + "\t" + 
-//	                                    (quantity == null ? "0" : quantity) + "\n";
-//	                    } while (rs.next());
-//	                }
-//	            }
-//	        }
-//	    } catch (SQLException e) {
-//	        e.printStackTrace();
-//	        feedback = "Error fetching data from the database.";
-//	    }
-//	    
-//	    return feedback;
-//	}
-
-	
-//	private static boolean PerformBuy(String buyInfo) throws IOException {		
-//		Scanner stocksDBScanner = new Scanner(stocksDB);
-//		String user = "";
-//		String userData = "";
-//		String oldContent = "";
-//		String newFileContent = "";
-//		String ticker = "";
-//		int lineNumber = 0;
-//		int currentStockQuantity = 0;
-//		int newStockQuantity = 0;
-//		double totalBuyPrice = 0;
-//		double unitPrice = 0;
-//		double purchasePower = 0;
-//		double newPurchasePower = 0;
-//		boolean purchaseSuccessful = false;
-//		
-//		//get qty
-//		int buyQuantity = Integer.parseInt(buyInfo.split(" ")[1]); //could throw numberFormatException
-//		
-//		//get stock unit price and balance and current quantity owned by user
-//		while (stocksDBScanner.hasNextLine())
-//		{
-//			++lineNumber;
-//			userData = stocksDBScanner.nextLine();
-//			
-//			if(lineNumber == 1) {
-//				user = userData.split(" ")[0].split(":")[1];
-//				
-//				if(user.equals(currentUsername)) {
-//					purchasePower = Double.parseDouble(userData.split(" ")[1].split(":")[1]);
-//				}
-//			}
-//			
-//			//get price and current quantity owned from db
-//			else if(user.equals(currentUsername) && lineNumber > 2 && buyInfo.split(" ")[0].equals(userData.split("\t")[0].trim())) {
-//				ticker = userData.split("\t")[0].trim();
-//				unitPrice = Double.parseDouble(userData.split("\t")[1].trim().replace("$", ""));
-//				currentStockQuantity = Integer.parseInt(userData.split("\t")[2].trim());
-//			}
-//			
-//			oldContent = oldContent + userData + System.lineSeparator();
-//		}
-//		
-//		stocksDBScanner.close();
-//		
-//		//get total buy price
-//		totalBuyPrice = buyQuantity * unitPrice;
-//		
-//		//check if there is enough to purchase
-//		if(totalBuyPrice <= purchasePower) {
-//			newPurchasePower = purchasePower - totalBuyPrice; //charge user
-//			newStockQuantity = currentStockQuantity + buyQuantity; //get the stocks
-//
-//			//update stock qty and purchase power for user
-////			System.out.println("balance:" + purchasePower);
-////			System.out.println(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity);
-////			System.out.println(newStockQuantity);
-//			newFileContent = oldContent.replaceAll("balance:" + purchasePower, "balance:" + (newPurchasePower)).replace(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity, ticker + " \t$" +  unitPrice + " \t" + newStockQuantity);
-//			FileWriter writer = new FileWriter(stocksDB);
-//			writer.write(newFileContent.trim());
-//			writer.close();
-//			
-//			purchaseSuccessful = true;
-//		}
-//
-//		return purchaseSuccessful;
-//	}
-
-
+	/**
+	 * Performs the stock buying operation if applicable, and updates the user's database records.
+	 * @param buyInfo - information about the purchase such as the stock ticker and quantity
+	 * @throws SQLException
+	 */
 	private static boolean PerformBuy(String buyInfo) throws SQLException {
 	    boolean purchaseSuccessful = false;
 
@@ -1451,72 +1109,11 @@ public class Broker
 	    return purchaseSuccessful;
 	}
 
-	
-//	private static boolean PerformSell(String sellInfo) throws IOException {		
-//		Scanner stocksDBScanner = new Scanner(stocksDB);
-//		String user = "";
-//		String userData = "";
-//		String oldContent = "";
-//		String newFileContent = "";
-//		String ticker = "";
-//		int lineNumber = 0;
-//		int currentStockQuantity = 0;
-//		int newStockQuantity = 0;
-//		double totalSellPrice = 0;
-//		double unitPrice = 0;
-//		double currentPurchasePower = 0;
-//		double newPurchasePower = 0;
-//		boolean saleSuccessful = false;
-//		
-//		//get qty
-//		int saleQuantity = Integer.parseInt(sellInfo.split(" ")[1]); //could throw numberFormatException
-//		
-//		//get stock unit price and balance and current quantity owned by user
-//		while (stocksDBScanner.hasNextLine())
-//		{
-//			++lineNumber;
-//			userData = stocksDBScanner.nextLine();
-//			
-//			if(lineNumber == 1) {
-//				user = userData.split(" ")[0].split(":")[1];
-//				
-//				if(user.equals(currentUsername)) {
-//					currentPurchasePower = Double.parseDouble(userData.split(" ")[1].split(":")[1]);
-//				}
-//			}
-//			
-//			//get price and current quantity owned from db
-//			else if(user.equals(currentUsername) && lineNumber > 2 && sellInfo.split(" ")[0].equals(userData.split("\t")[0].trim())) {
-//				ticker = userData.split("\t")[0].trim();
-//				unitPrice = Double.parseDouble(userData.split("\t")[1].trim().replace("$", ""));
-//				currentStockQuantity = Integer.parseInt(userData.split("\t")[2].trim());
-//			}
-//			
-//			oldContent = oldContent + userData + System.lineSeparator();
-//		}
-//		
-//		stocksDBScanner.close();
-//		
-//		//get total sell price
-//		totalSellPrice = saleQuantity * unitPrice;
-//		
-//		//check if there is enough to sell
-//		if(currentStockQuantity >= saleQuantity) {
-//			newPurchasePower = currentPurchasePower + totalSellPrice; //credit user
-//			newStockQuantity = currentStockQuantity - saleQuantity; //sell the stocks
-//
-//			//update stock qty and purchase power for user
-//			newFileContent = oldContent.replaceAll("balance:" + (currentPurchasePower), "balance:" + (newPurchasePower)).replace(ticker + " \t$" +  unitPrice + " \t" + currentStockQuantity, ticker + " \t$" +  unitPrice + " \t" + newStockQuantity);
-//			FileWriter writer = new FileWriter(stocksDB);
-//			writer.write(newFileContent.trim());
-//			writer.close();
-//	
-//			saleSuccessful = true;
-//		}
-//
-//		return saleSuccessful;
-//	}
-
+	/**
+	 * Performs the stock selling operation if applicable, and updates the user's database records.
+	 * @param sellInfo - information about the sale such as the stock ticker and quantity
+	 * @throws SQLException
+	 */
 	private static boolean PerformSell(String sellInfo) throws SQLException {
 	    boolean saleSuccessful = false;
 
@@ -1583,34 +1180,12 @@ public class Broker
 	    return saleSuccessful;
 	}
 
-	
-	//verifies the pin for Buy/Sell commands
-//	private static boolean VerifyPin(String senderName, String decryptedCommand) throws FileNotFoundException
-//	{
-//		boolean isPinValid = false;
-//		Scanner userDBScanner = new Scanner(userDB);
-//		String userData = "";
-//		String dbUser = "";
-//		String dbPin = "";
-//		String enteredPin = decryptedCommand.split(" ")[2];
-//		
-//		while (userDBScanner.hasNextLine())
-//		{
-//			userData = userDBScanner.nextLine();
-//			dbUser = userData.split(" ")[1];
-//			dbPin = new String(Base64.getDecoder().decode(userData.split(" ")[2])); //pwd is base 64 encoded
-//			
-//			if(dbUser.equals(currentUsername) && dbPin.equals(enteredPin)) 
-//			{
-//				isPinValid = true;
-//				break;
-//			}
-//		}
-//		
-//		userDBScanner.close();
-//		return isPinValid;
-//	}
-
+	/**
+	 * Verifies the user's trading pin before performing a transaction. The encoded pin is checked
+	 * against the user's database records.
+	 * @param senderName - the client's name
+	 * @param decryptedCommand - the user's decrypted pin, which is encoded
+	 */
 	private static boolean VerifyPin(String senderName, String decryptedCommand) {
 	    boolean isPinValid = false;
 	    String enteredPin = decryptedCommand.split(" ")[2];
@@ -1646,46 +1221,19 @@ public class Broker
 	    }
 
 	    return isPinValid;
-	}
-
+	}	
 	
-	//verifies the login password
-//	private static boolean VerifyPassword(String senderName, String decryptedCommand) throws FileNotFoundException
-//	{
-//		Scanner userDBScanner = new Scanner(userDB);
-//		boolean foundUser = false;
-//		String userData = "";
-//		String dbUser = "";
-//		String dbPwd = "";
-//		String enteredUsername = decryptedCommand.split(" ")[0];
-//		String enteredPwd = decryptedCommand.split(" ")[1];
-//		
-//		while (userDBScanner.hasNextLine())
-//		{
-//			userData = userDBScanner.nextLine();
-//			dbUser = userData.split(" ")[1];
-//			dbPwd = new String(Base64.getDecoder().decode(userData.split(" ")[2])); //pwd is base 64 encoded
-//			
-//			if(dbUser.equals(enteredUsername) && dbPwd.equals(enteredPwd)) 
-//			{
-//				foundUser = true;
-//				currentUsername = enteredUsername;
-//				break;
-//			}
-//		}
-//		
-//		userDBScanner.close();
-//		return foundUser;
-//	}
-	
-	
-	//Login authentication with DB
+	/**
+	 * Verifies the user's login password. The encoded password is checked
+	 * against the user's database records.
+	 * @param senderName - the client's name
+	 * @param decryptedCommand - the user's decrypted password, which is encoded
+	 */
 	private static boolean VerifyPassword(String senderName, String decryptedCommand) {
 	    boolean foundUser = false;
 	    String enteredUsername = decryptedCommand.split(" ")[0];
 	    String enteredPwd = decryptedCommand.split(" ")[1];
-	    
-	    
+	     
 	    // SQL query to check the user in the database
 	    String query = "SELECT username, password FROM users WHERE username = ?";
 	    
@@ -1720,69 +1268,10 @@ public class Broker
 
 	    return foundUser;
 	}
-
 	
-	 // Verifies the login password using a database instead of a file
-//    private static boolean VerifyPassword(String decryptedCommand) 
-//    {
-//        boolean foundUser = false;
-//        String enteredUsername = decryptedCommand.split(" ")[0];
-//        String enteredPwd = decryptedCommand.split(" ")[1];
-//        
-//        // Database connection details
-////        String dbUrl = "jdbc:mysql://localhost:3306/yourDatabaseName"; // Replace with your DB details
-////        String dbUsername = "yourDBUsername"; // Replace with your DB username
-////        String dbPassword = "yourDBPassword"; // Replace with your DB password
-//        
-//        Connection conn = null;
-//        PreparedStatement stmt = null;
-//        ResultSet rs = null;
-//
-//        try {
-//            // Establish connection to the database
-//            conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
-//            
-//            // Prepare a SQL query to check if the user exists
-//            String sql = "SELECT username, password FROM users WHERE username = ?";
-//            stmt = conn.prepareStatement(sql);
-//            stmt.setString(1, enteredUsername);
-//            
-//            // Execute the query
-//            rs = stmt.executeQuery();
-//            
-//            // Check if the user is found
-//            if (rs.next()) {
-//                // Retrieve the username and password (base64 encoded)
-//                String dbUser = rs.getString("username");
-//                String dbPwd = rs.getString("password");
-//                
-//                // Decode the password from base64
-//                String decodedDbPwd = new String(Base64.getDecoder().decode(dbPwd));
-//                
-//                // Compare the entered password with the decoded one
-//                if (dbUser.equals(enteredUsername) && decodedDbPwd.equals(enteredPwd)) {
-//                    foundUser = true;
-//                    currentUsername = enteredUsername;
-//                }
-//            }
-//        } catch (SQLException e) {
-//            e.printStackTrace(); // Handle SQL exceptions
-//        } finally {
-//            // Close resources
-//            try {
-//                if (rs != null) rs.close();
-//                if (stmt != null) stmt.close();
-//                if (conn != null) conn.close();
-//            } catch (SQLException e) {
-//                e.printStackTrace();
-//            }
-//        }
-//        
-//        return foundUser;
-//    }
-	
-	/*
-	 * digital signature
+	/**
+	 * Signs the encrypted message to be sent to the client.
+	 * @throws SignatureException
 	 */
 	private static void SignMessage() throws SignatureException
 	{
@@ -1791,7 +1280,8 @@ public class Broker
 		System.out.println("Digital signature applied to encrypted message: " + messageDigitalSignature);
 	}
 	
-	/******************** below are different versions of the same method used to perform the encryptions in different orders ***************************/
+	/******************** Below are different versions of the same method used to perform the encryptions in different orders. The order of encryption is commented on top of each method, 
+	 * where GHC stands for (GCM encryption, followed by HMAC verification, followed by CCMP encryption). ***************************/
 
 	//GHC
 	private static String ThreeLayerEncryption(String message) throws InvalidKeyException, NoSuchAlgorithmException, Exception
@@ -1937,6 +1427,10 @@ public class Broker
 //		return CCMP_encryptedMessage;
 //	}
 
+	/**
+	 * Generates the key used for AES-GCM encryption.
+	 * @throws Exception
+	 */
 	public static void GenerateAESKey() throws Exception 
 	{
 		int keySize = 0;
@@ -1973,40 +1467,21 @@ public class Broker
 		key = new SecretKeySpec(str.getBytes(), "AES");
 	}
 
-	//	public SecretKey getKey()
-	//	{
-	//		return key;
-	//	}
-	//	
-	//	public void setKey(SecretKey aesKey)
-	//	{
-	//		this.key = aesKey;
-	//	}
-	//	
-//	public Cipher getEncryptionCipher()
-//	{
-//		return encryptionCipher;
-//	}
-//
-//	public void setEncryptionCipher(Cipher encryptionCipher)
-//	{
-//		this.encryptionCipher = encryptionCipher;
-//	}
-
-	//turns byte into string and returns the string
+	/**
+	 * Base 64 encodes a byte of data into a string.
+	 * @param data - the byte to be encoded
+	 */
 	private static String encode(byte[] data) 
 	{
 		return Base64.getEncoder().encodeToString(data);
 	}
 
-	//turns string into byte and returns the byte
+	/**
+	 * Base 64 decodes a string of data into a byte.
+	 * @param data - the string to be decoded
+	 */
 	private static byte[] decode(String data) 
 	{
 		return Base64.getDecoder().decode(data);
 	}
-
-//	public void Wait() throws InterruptedException
-//	{
-//		Thread.sleep(1);
-//	}
 }
