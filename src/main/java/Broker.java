@@ -240,7 +240,8 @@ public class Broker
 	
 	/**
 	 * Generates the broker's digital signature to be attached to every message
-	 * @throws IOException
+	 * @throws NoSuchAlgorithmException
+	 * @throws InvalidKeyException
 	 */
 	private static void GenerateDigitalSignature() throws NoSuchAlgorithmException, InvalidKeyException
 	{
@@ -395,9 +396,7 @@ public class Broker
 	public static String Encrypt(String message) throws Exception
 	{		
 		String encryptedData = encrypt(message);
-
 		System.out.println("Message AES-GCM encrypted by " + clientName + ": " + encryptedData);
-
 		return encryptedData;
 	}
 
@@ -457,7 +456,6 @@ public class Broker
 		byte[] encryptedBytes = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
 
 		// Encode the encrypted bytes to Base64 string
-		//encode(encryptedBytes);
 		System.out.println("Cipher Block Chain Encryption: " + Base64.getEncoder().encodeToString(encryptedBytes));
 		return Base64.getEncoder().encodeToString(encryptedBytes);
 	}
@@ -468,7 +466,8 @@ public class Broker
 	 * @param key - the key used for the cipher decryption
 	 * @throws Exception
 	 */
-	public static String CCMP_Decrypt(String ciphertext, String key) throws Exception {
+	public static String CCMP_Decrypt(String ciphertext, String key) throws Exception 
+	{
 		// Generate a 256-bit key from the given decryption key
 		byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
 		MessageDigest sha = MessageDigest.getInstance("SHA-256");
