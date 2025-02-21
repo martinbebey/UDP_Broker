@@ -885,7 +885,7 @@ public class Broker
 					}
 					else {
 						System.out.println(clientName + " message: Purchase unsuccessful!");
-						feedback = "Pin verified. Purchase unsuccessful! Please check that you have enough purchasing power for this transaction.";
+						feedback = "Pin verified. Purchase unsuccessful! Please check your balance and the trading information provided.";
 					}
 				}
 				
@@ -1037,76 +1037,99 @@ public class Broker
 	 * Performs the stock buying operation if applicable, and updates the user's database records.
 	 * @param buyInfo - information about the purchase such as the stock ticker and quantity
 	 * @throws SQLException
-	 */
-	private static boolean PerformBuy(String buyInfo) throws SQLException {
-	    boolean purchaseSuccessful = false;
+	 */    
+    private static boolean PerformBuy(String buyInfo) throws SQLException {
+        boolean purchaseSuccessful = false;
 
-	    // Parse the buyInfo to get the stock ticker and the quantity to buy
-	    String tickerToBuy = buyInfo.split(" ")[0];
-	    int buyQuantity = Integer.parseInt(buyInfo.split(" ")[1]);
+        // Parse the buyInfo to get the stock ticker and the quantity to buy
+        String tickerToBuy = buyInfo.split(" ")[0];
+        int buyQuantity = Integer.parseInt(buyInfo.split(" ")[1]);
 
-	    // MySQL connection setup
-	    Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
+        // Fetch the stock price using the existing getStockPriceFromYahoo function
+        double unitPrice = getStockPriceFromYahoo(tickerToBuy);
 
-	    // Query to get the user's current balance (purchase power)
-	    String balanceQuery = "SELECT balance FROM users WHERE username = ?";
-	    PreparedStatement balanceStmt = conn.prepareStatement(balanceQuery);
-	    balanceStmt.setString(1, currentUsername); // Set the current logged-in user's username
-	    ResultSet balanceResult = balanceStmt.executeQuery();
+        // If the price is not valid, exit the function
+        if (unitPrice <= 0) {
+            System.out.println("Invalid stock info " + tickerToBuy);
+            return false;
+        }
 
-	    if (balanceResult.next()) {
-	        double purchasePower = Double.parseDouble(balanceResult.getString("balance"));
-	        
-	        // Query to get the stock unit price and the current stock quantity for the specified ticker
-	        String stockQuery = "SELECT price, quantity FROM stocks WHERE username = ? AND ticker = ?";
-	        PreparedStatement stockStmt = conn.prepareStatement(stockQuery);
-	        stockStmt.setString(1, currentUsername); // Set the current logged-in user's username
-	        stockStmt.setString(2, tickerToBuy); // Set the ticker from the buyInfo
-	        ResultSet stockResult = stockStmt.executeQuery();
+        // MySQL connection setup
+        Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
 
-	        double unitPrice = 0;
-	        int currentStockQuantity = 0;
+        // Query to get the user's current balance (purchase power)
+        String balanceQuery = "SELECT balance FROM users WHERE username = ?";
+        PreparedStatement balanceStmt = conn.prepareStatement(balanceQuery);
+        balanceStmt.setString(1, currentUsername); // Set the current logged-in user's username
+        ResultSet balanceResult = balanceStmt.executeQuery();
 
-	        if (stockResult.next()) {
-	            unitPrice = Double.parseDouble(stockResult.getString("price").replace("$", ""));
-	            currentStockQuantity = Integer.parseInt(stockResult.getString("quantity"));
-	        }
+        if (balanceResult.next()) {
+            double purchasePower = balanceResult.getDouble("balance");
 
-	        // Calculate the total purchase price
-	        double totalBuyPrice = buyQuantity * unitPrice;
+            // Calculate the total purchase price
+            double totalBuyPrice = buyQuantity * unitPrice;
 
-	        // Check if the user has enough purchase power to make the purchase
-	        if (totalBuyPrice <= purchasePower) {
-	            double newPurchasePower = purchasePower - totalBuyPrice; // Deduct the purchase price from the user's balance
-	            int newStockQuantity = currentStockQuantity + buyQuantity; // Increase the stock quantity for the user
+            // Check if the user has enough purchase power to make the purchase
+            if (totalBuyPrice <= purchasePower) {
+                // Query to get the stock quantity for the specified ticker
+                String stockQuery = "SELECT quantity FROM stocks WHERE username = ? AND ticker = ?";
+                PreparedStatement stockStmt = conn.prepareStatement(stockQuery);
+                stockStmt.setString(1, currentUsername); // Set the current logged-in user's username
+                stockStmt.setString(2, tickerToBuy); // Set the ticker from the buyInfo
+                ResultSet stockResult = stockStmt.executeQuery();
 
-	            // Update the user's balance
-	            String updateBalanceQuery = "UPDATE users SET balance = ? WHERE username = ?";
-	            PreparedStatement updateBalanceStmt = conn.prepareStatement(updateBalanceQuery);
-	            updateBalanceStmt.setDouble(1, newPurchasePower);
-	            updateBalanceStmt.setString(2, currentUsername);
-	            updateBalanceStmt.executeUpdate();
+                int currentStockQuantity = 0;
 
-	            // Update the stock quantity for the user
-	            String updateStockQuery = "UPDATE stocks SET quantity = ? WHERE username = ? AND ticker = ?";
-	            PreparedStatement updateStockStmt = conn.prepareStatement(updateStockQuery);
-	            updateStockStmt.setInt(1, newStockQuantity);
-	            updateStockStmt.setString(2, currentUsername);
-	            updateStockStmt.setString(3, tickerToBuy);
-	            updateStockStmt.executeUpdate();
+                if (stockResult.next()) {
+                    currentStockQuantity = stockResult.getInt("quantity");
+                }
 
-	            purchaseSuccessful = true; // The purchase was successful
-	        }
-	        
-		    stockResult.close();
-	    }
+                // Update the user's balance
+                double newPurchasePower = purchasePower - totalBuyPrice; // Deduct the purchase price from the user's balance
+                String updateBalanceQuery = "UPDATE users SET balance = ? WHERE username = ?";
+                PreparedStatement updateBalanceStmt = conn.prepareStatement(updateBalanceQuery);
+                updateBalanceStmt.setDouble(1, newPurchasePower);
+                updateBalanceStmt.setString(2, currentUsername);
+                updateBalanceStmt.executeUpdate();
 
-	    // Close the database connections
-	    balanceResult.close();
-	    conn.close();
+                // Check if the stock already exists for the user, then update or insert
+                String updateStockQuery;
+                if (currentStockQuantity > 0) {
+                    // Update the stock quantity and price if the user already has this stock
+                    updateStockQuery = "UPDATE stocks SET quantity = ?, price = ? WHERE username = ? AND ticker = ?";
+                    PreparedStatement updateStockStmt = conn.prepareStatement(updateStockQuery);
+                    updateStockStmt.setInt(1, currentStockQuantity + buyQuantity); // Increase the stock quantity for the user
+                    updateStockStmt.setDouble(2, unitPrice); // Update the stock price with the latest price
+                    updateStockStmt.setString(3, currentUsername);
+                    updateStockStmt.setString(4, tickerToBuy);
+                    updateStockStmt.executeUpdate();
+                } 
+                else {
+                    // Create a new stock entry for the user if not already present
+                    updateStockQuery = "INSERT INTO stocks (username, ticker, price, quantity) VALUES (?, ?, ?, ?)";
+                    PreparedStatement insertStockStmt = conn.prepareStatement(updateStockQuery);
+                    insertStockStmt.setString(1, currentUsername);
+                    insertStockStmt.setString(2, tickerToBuy);
+                    insertStockStmt.setDouble(3, unitPrice);
+                    insertStockStmt.setInt(4, buyQuantity);
+                    insertStockStmt.executeUpdate();
+                }
 
-	    return purchaseSuccessful;
-	}
+                purchaseSuccessful = true; // The purchase was successful
+                
+                stockResult.close();
+            } 
+            else {
+                System.out.println("Insufficient funds to make the purchase.");
+            }
+        }
+
+        // Close the database connections
+        balanceResult.close();
+        conn.close();
+
+        return purchaseSuccessful;
+    }
 
 	/**
 	 * Performs the stock selling operation if applicable, and updates the user's database records.
