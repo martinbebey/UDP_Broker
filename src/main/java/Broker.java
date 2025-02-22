@@ -488,7 +488,6 @@ public class Broker
 		byte[] decryptedBytes = cipher.doFinal(encryptedBytes);
 
 		// Convert the decrypted bytes to plain text
-		//encode(decryptedBytes);
 		return new String(decryptedBytes, StandardCharsets.UTF_8);
 	}
 	
@@ -977,7 +976,6 @@ public class Broker
                             if (ticker != null) {
                                 // Fetch the current price from Yahoo Finance using jsoup
                                 double currentPrice = getStockPriceFromYahoo(ticker);
-                                System.out.println("shit " + ticker + " = " + currentPrice);
                                 
                                 // Update the stock price in the database
                                 String updateQuery = "UPDATE stocks SET price = ? WHERE username = ? AND ticker = ?";
@@ -1230,10 +1228,10 @@ public class Broker
 	            String dbUser = rs.getString("username");
 	            String dbPin = rs.getString("pin");
 	            
-	            dbPin = new String(Base64.getDecoder().decode(dbPin));
+	            byte[] encodedPinEntered = Base64.getEncoder().encode(enteredPin.getBytes());
 	            
 	            // Compare the username and pin
-	            if (dbUser.equals(currentUsername) && dbPin.equals(enteredPin)) {
+	            if (dbUser.equals(currentUsername) && Arrays.equals(dbPin.getBytes(), encodedPinEntered)) {
 	                isPinValid = true;
 	            }
 	        }
@@ -1272,13 +1270,13 @@ public class Broker
 	        if (rs.next()) {
 	            // Get the stored username, password (base64 encoded)
 	            String dbUser = rs.getString("username");
-	            String dbPwdBase64 = rs.getString("password");
+	            String dbPwdEncoded = rs.getString("password");	          
 	            
-	            // Decode the stored password from base64
-	            String dbPwd = new String(Base64.getDecoder().decode(dbPwdBase64));
+	            //encode the pwd entered by the user
+	            byte[] encodedPwdEntered = Base64.getEncoder().encode(enteredPwd.getBytes());
 	            
-	            // Compare the username and password
-	            if (dbUser.equals(enteredUsername) && dbPwd.equals(enteredPwd)) {
+	            // Compare the username and password to db records
+	            if (dbUser.equals(enteredUsername) && Arrays.equals(dbPwdEncoded.getBytes(), encodedPwdEntered)) {
 	                foundUser = true;
 	                currentUsername = enteredUsername; // Store the current logged-in username
 	            }
