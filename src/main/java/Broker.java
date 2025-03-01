@@ -1133,7 +1133,7 @@ public class Broker
 	 * Performs the stock selling operation if applicable, and updates the user's database records.
 	 * @param sellInfo - information about the sale such as the stock ticker and quantity
 	 * @throws SQLException
-	 */
+	 */	
 	private static boolean PerformSell(String sellInfo) throws SQLException {
 	    boolean saleSuccessful = false;
 
@@ -1141,64 +1141,88 @@ public class Broker
 	    String tickerToSell = sellInfo.split(" ")[0];
 	    int saleQuantity = Integer.parseInt(sellInfo.split(" ")[1]);
 
-	    // MySQL connection setup
-	    Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
-
-	    // Query to get the user's current stock quantity and unit price for the specified ticker
-	    String stockQuery = "SELECT price, quantity FROM stocks WHERE username = ? AND ticker = ?";
-	    PreparedStatement stockStmt = conn.prepareStatement(stockQuery);
-	    stockStmt.setString(1, currentUsername); // Set the current logged-in user's username
-	    stockStmt.setString(2, tickerToSell); // Set the ticker from the sellInfo
-	    ResultSet stockResult = stockStmt.executeQuery();
-
-	    if (stockResult.next()) {
-	        double unitPrice = Double.parseDouble(stockResult.getString("price").replace("$", ""));
-	        int currentStockQuantity = Integer.parseInt(stockResult.getString("quantity"));
-	        
-	        // Check if the user has enough stock to sell
-	        if (currentStockQuantity >= saleQuantity) {
-	            // Calculate the total sell price
-	            double totalSellPrice = saleQuantity * unitPrice;
-
-	            // Query to get the user's current balance
-	            String balanceQuery = "SELECT balance FROM users WHERE username = ?";
-	            PreparedStatement balanceStmt = conn.prepareStatement(balanceQuery);
-	            balanceStmt.setString(1, currentUsername); // Set the current logged-in user's username
-	            ResultSet balanceResult = balanceStmt.executeQuery();
-
-	            if (balanceResult.next()) {
-	                double currentPurchasePower = Double.parseDouble(balanceResult.getString("balance"));
-	                double newPurchasePower = currentPurchasePower + totalSellPrice; // Add the sell price to the balance
-
-	                // Update the user's balance in the users table
-	                String updateBalanceQuery = "UPDATE users SET balance = ? WHERE username = ?";
-	                PreparedStatement updateBalanceStmt = conn.prepareStatement(updateBalanceQuery);
-	                updateBalanceStmt.setDouble(1, newPurchasePower);
-	                updateBalanceStmt.setString(2, currentUsername);
-	                updateBalanceStmt.executeUpdate();
-
-	                // Update the stock quantity in the stocks table
-	                int newStockQuantity = currentStockQuantity - saleQuantity;
-	                String updateStockQuery = "UPDATE stocks SET quantity = ? WHERE username = ? AND ticker = ?";
-	                PreparedStatement updateStockStmt = conn.prepareStatement(updateStockQuery);
-	                updateStockStmt.setInt(1, newStockQuantity);
-	                updateStockStmt.setString(2, currentUsername);
-	                updateStockStmt.setString(3, tickerToSell);
-	                updateStockStmt.executeUpdate();
-
-	                saleSuccessful = true; // The sale was successful
-	            }
-	            
-	    	    balanceResult.close();
-	        }
+	    // Fetch the current stock price from Yahoo Finance
+	    double unitPrice = getStockPriceFromYahoo(tickerToSell);
+	    if (unitPrice <= 0) {
+	        System.out.println("Invalid stock price for " + tickerToSell);
+	        return false; // If the price is invalid, exit the function
 	    }
 
-	    // Close the database connections
-	    stockResult.close();
-	    conn.close();
+	    // MySQL connection setup
+	    try (Connection conn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
+
+	        // Check if the stock record exists for the user and update the price if it does
+	        String checkStockQuery = "SELECT quantity FROM stocks WHERE username = ? AND ticker = ?";
+	        try (PreparedStatement stockStmt = conn.prepareStatement(checkStockQuery)) {
+	            stockStmt.setString(1, currentUsername); // Set the current logged-in user's username
+	            stockStmt.setString(2, tickerToSell); // Set the ticker from the sellInfo
+	            try (ResultSet stockResult = stockStmt.executeQuery()) {
+	                if (stockResult.next()) {
+	                    // Update the stock price in the database
+	                    String updateStockPriceQuery = "UPDATE stocks SET price = ? WHERE username = ? AND ticker = ?";
+	                    try (PreparedStatement updateStockPriceStmt = conn.prepareStatement(updateStockPriceQuery)) {
+	                        updateStockPriceStmt.setDouble(1, unitPrice);
+	                        updateStockPriceStmt.setString(2, currentUsername);
+	                        updateStockPriceStmt.setString(3, tickerToSell);
+	                        updateStockPriceStmt.executeUpdate();
+	                    }
+
+	                    // Now get the current stock quantity
+	                    int currentStockQuantity = stockResult.getInt("quantity");
+
+	                    // Check if the user has enough stock to sell
+	                    if (currentStockQuantity >= saleQuantity) {
+	                        // Calculate the total sell price
+	                        double totalSellPrice = saleQuantity * unitPrice;
+
+	                        // Query to get the user's current balance
+	                        String balanceQuery = "SELECT balance FROM users WHERE username = ?";
+	                        try (PreparedStatement balanceStmt = conn.prepareStatement(balanceQuery)) {
+	                            balanceStmt.setString(1, currentUsername); // Set the current logged-in user's username
+	                            try (ResultSet balanceResult = balanceStmt.executeQuery()) {
+	                                if (balanceResult.next()) {
+	                                    double currentPurchasePower = balanceResult.getDouble("balance");
+	                                    double newPurchasePower = currentPurchasePower + totalSellPrice; // Add the sell price to the balance
+
+	                                    // Update the user's balance in the users table
+	                                    String updateBalanceQuery = "UPDATE users SET balance = ? WHERE username = ?";
+	                                    try (PreparedStatement updateBalanceStmt = conn.prepareStatement(updateBalanceQuery)) {
+	                                        updateBalanceStmt.setDouble(1, newPurchasePower);
+	                                        updateBalanceStmt.setString(2, currentUsername);
+	                                        updateBalanceStmt.executeUpdate();
+	                                    }
+
+	                                    // Update the stock quantity in the stocks table
+	                                    int newStockQuantity = currentStockQuantity - saleQuantity;
+	                                    String updateStockQuery = "UPDATE stocks SET quantity = ? WHERE username = ? AND ticker = ?";
+	                                    try (PreparedStatement updateStockStmt = conn.prepareStatement(updateStockQuery)) {
+	                                        updateStockStmt.setInt(1, newStockQuantity);
+	                                        updateStockStmt.setString(2, currentUsername);
+	                                        updateStockStmt.setString(3, tickerToSell);
+	                                        updateStockStmt.executeUpdate();
+	                                    }
+
+	                                    saleSuccessful = true; // The sale was successful
+	                                }
+	                            }
+	                        }
+	                    } else {
+	                        System.out.println("Insufficient stock to complete the sale.");
+	                    }
+	                } else {
+	                    System.out.println("No stock found for " + tickerToSell);
+	                }
+	            }
+	        }
+
+	    } catch (SQLException e) {
+	        System.out.println("Database error: " + e.getMessage());
+	        e.printStackTrace();
+	    }
 
 	    return saleSuccessful;
 	}
+
 
 	/**
 	 * Verifies the user's trading pin before performing a transaction. The encoded pin is checked
