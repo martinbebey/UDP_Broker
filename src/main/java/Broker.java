@@ -41,9 +41,10 @@ import org.jsoup.nodes.Element;
  */
 public class Broker 
 {
+	private static final int BUFFER_SIZE = 50000;
 	private static DatagramSocket socket;
-	private static byte[] buf = new byte[5000];
-	private static byte[] buffer = new byte[5000];
+	private static byte[] buf = new byte[BUFFER_SIZE];
+	private static byte[] buffer = new byte[BUFFER_SIZE];
 	private static int port = 0;
 	private static int datagramSocketPortNumber = 5000;
 	private static long averageEncryptionTime;
@@ -69,6 +70,7 @@ public class Broker
 	private static boolean logingIn;
 	private static boolean loggedIn = false;
 	private static boolean buyingStock;
+	private static boolean queryingSingleStock = false;
 	private static boolean sellingStock = false;
 	private static String currentUsername = "";
 	public static PublicKey publicKeyDS = null;
@@ -103,7 +105,7 @@ public class Broker
 		String received = new String(packet.getData(), 0, packet.getLength());
 		P = Integer.parseInt(received.trim());
 		socket.send(packet);
-		buf = new byte[5000];
+		buf = new byte[BUFFER_SIZE];
 		
 		//get G
 		packet = new DatagramPacket(buf, buf.length);
@@ -114,7 +116,7 @@ public class Broker
 		received = new String(packet.getData(), 0, packet.getLength());
 		G = Integer.parseInt(received.trim());
 		socket.send(packet);
-		buf = new byte[5000];
+		buf = new byte[BUFFER_SIZE];
 		
 		//generate of keys for HMAC, CCMP, AES-GCM and broker's Digital Signature
 		for(int i = 0; i < 3; ++i)
@@ -207,7 +209,7 @@ public class Broker
 	public static void sendMessage(String msg) throws IOException 
 	{
 		msg = buildMessage(msg);
-		buf = new byte[5000];
+		buf = new byte[BUFFER_SIZE];
 		buf = msg.getBytes();
 		DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
 		
@@ -807,6 +809,7 @@ public class Broker
 	private static void ProcessCommand(String decryptedCommand, String senderName) throws InvalidKeyException, NoSuchAlgorithmException, Exception
 	{
 		String feedback = "";
+		String loginErrorPrompt = "Please press [1] to login first";
 
 		switch(decryptedCommand)
 		{
@@ -822,7 +825,7 @@ public class Broker
 			}
 			
 			else {
-				feedback = "Please press [1] to login first";
+				feedback = loginErrorPrompt;
 			}
 			
 			break;
@@ -834,7 +837,7 @@ public class Broker
 			}
 			
 			else {
-				feedback = "Please press [1] to login first";
+				feedback = loginErrorPrompt;
 			}
 			
 			break;
@@ -846,10 +849,23 @@ public class Broker
 			}
 			
 			else {
-				feedback = "Please press [1] to login first";
+				feedback = loginErrorPrompt;
 			}
 			
 			break;
+			
+		case "5":
+			if(loggedIn) {
+				queryingSingleStock = true;
+				feedback = "Enter stock ticker: ";
+			}
+			
+			else {
+				feedback = loginErrorPrompt;
+			}
+			
+			break;
+
 
 		default:
 			if(logingIn) 
@@ -920,6 +936,11 @@ public class Broker
 				}	
 			}
 			
+			else if(queryingSingleStock) {
+				queryingSingleStock = false;
+				feedback = getIndividualStockInfo(decryptedCommand);
+			}
+			
 			else
 			{
 				System.out.println(clientName + " message: Command failed!");
@@ -936,7 +957,22 @@ public class Broker
 	}
 	
 	/**
-	 * Gets the LIVE stock information from Yahoo Finance.
+	 * Gets the LIVE stock information from Yahoo Finance for a given ticker
+	 * @param ticker - the ticker whose LIVE has been requested
+	 * @return feedback - the live price for this stock ticker
+	 */
+	private static String getIndividualStockInfo(String ticker) {
+		String feedback = "\n\n";
+		double currentPrice = getStockPriceFromYahoo(ticker);
+		feedback += ticker + ": $" + currentPrice;
+		
+		return feedback;
+	}
+	
+	
+	/**
+	 * Gets the LIVE stock information from Yahoo Finance and returns the user's updated stock information from the DB
+	 * @return feedback - the live stock info for the current user
 	 * @throws IOException
 	 */
     private static String getStockInfo() throws IOException {
@@ -1014,7 +1050,7 @@ public class Broker
             Document doc = Jsoup.connect(url).get();
             
             // Find the stock price by selecting the appropriate HTML element
-            Element priceElement = doc.select("span[data-testid='qsp-price']").first();; //doc.select("fin-streamer[data-symbol='regularMarketPrice']").first();
+            Element priceElement = doc.select("span[data-testid='qsp-price']").first();
             
             // Extract the text (price) from the element
             if (priceElement != null) {
