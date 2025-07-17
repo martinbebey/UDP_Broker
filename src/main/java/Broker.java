@@ -1,9 +1,14 @@
 package src.main.java;
 
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -26,12 +31,18 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Enumeration;
 import java.util.concurrent.ThreadLocalRandom;
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -48,8 +59,8 @@ public class Broker
 	private static int port = 0;
 	private static int datagramSocketPortNumber = 5000;
 	private static long averageEncryptionTime;
-	private static long averagePacketSentSize;
-	private static long averagePacketReceivedSize;
+	private static long packetSentSize;
+	private static long packetReceivedSize;
 	private static long encryptionCount = 0;
 	private static long averageDecryptionTime;
 	private static long decryptionCount = 0;
@@ -77,6 +88,10 @@ public class Broker
 	public static 	byte[] hmacSignature;
 	public static byte[] messageDigitalSignature = null;
 	public static String clientName = "Broker";
+	private static String excelFilePath = "C:\\Users\\Public\\Metrics_Broker.xlsx";
+	private static int excelRowIndex = 0;
+	private static int startingRowIndex = 10;
+	private static int excelColumnIndex = 1;
 	public static boolean newMessage = false;
 	public static int P; //used for DH key exchange
 	public static int G; //used for DH key exchange
@@ -84,6 +99,7 @@ public class Broker
     private static String dbUrl = "jdbc:mysql://localhost:3306/myDB";
     private static String dbUsername = "root";
     private static String dbPassword = "123";
+    private static String command = "";
 
 
 	/**
@@ -95,6 +111,8 @@ public class Broker
 	{
 		socket = new DatagramSocket(datagramSocketPortNumber);		
 		boolean running = true;
+		
+		printInetAddress();
 		
 		//P & G for DH 
 		DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -162,10 +180,12 @@ public class Broker
 			port = packet.getPort();
 			packet = new DatagramPacket(buffer, buffer.length, address, port);
 			received = new String(packet.getData(), 0, packet.getLength());
-			System.out.println("Receiving packet of size: " + packet.getLength());
-			averagePacketReceivedSize += packet.getLength();
-			System.out.println("Average size of packets received: " + averagePacketReceivedSize);	
-			System.out.println(received);
+			System.out.println("*Receiving packet of size: " + packet.getLength());
+			excelRowIndex = startingRowIndex + 3;
+	        writeToExcelCell(String.valueOf(packet.getLength()));
+			packetReceivedSize = packet.getLength();
+			System.out.println("Size of packets received: " + packetReceivedSize);	
+			System.out.println("Received: " + received);
 			
 			//breakdown response
 			String encryptedResponse = received.split("\\|")[0];
@@ -188,6 +208,66 @@ public class Broker
 		socket.close();
 	}
 	
+	private static void printInetAddress() {
+		try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface iface = interfaces.nextElement();
+
+                // Skip loopback and down interfaces
+                if (iface.isLoopback() || !iface.isUp()) continue;
+
+                Enumeration<InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress addr = addresses.nextElement();
+
+                    // Check for IPv4 only
+                    if (addr instanceof Inet4Address) {
+                        System.out.println("Broker's IP Address: " + addr.getHostAddress());
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            System.err.println("Error: " + e.getMessage());
+        }
+	}
+	
+	/**
+     * Writes a string value into a specific cell of an Excel (.xlsx) file.
+     *
+     * @param excelFilePath Full path to the Excel file (e.g. "C:\\Users\\you\\Desktop\\file.xlsx")
+     * @param excelRowIndex      Row number (0-based)
+     * @param excelColumnIndex      Column number (0-based)
+     * @param value         The string to write
+     */
+	private static void writeToExcelCell(String value) {
+		if(command.equals("2")) {
+			try (FileInputStream fis = new FileInputStream(excelFilePath);
+					Workbook workbook = new XSSFWorkbook(fis)) {
+
+				Sheet sheet = workbook.getSheetAt(0); // get first sheet
+				Row row = ((org.apache.poi.ss.usermodel.Sheet) sheet).getRow(excelRowIndex);
+				if (row == null) row = sheet.createRow(excelRowIndex);
+
+				Cell cell = row.getCell(excelColumnIndex);
+				if (cell == null) cell = row.createCell(excelColumnIndex);
+
+				cell.setCellValue(value);
+
+				fis.close(); // close input stream before writing
+
+				try (FileOutputStream fos = new FileOutputStream(excelFilePath)) {
+					workbook.write(fos);
+					System.out.println("Value written to Excel: " + value);
+				}
+
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+	}
+	
 	/**
 	 * Shares the public value with the connected client.
 	 * @param msg the message to be included in the packet to be sent to the client. 
@@ -206,16 +286,18 @@ public class Broker
 	 * @param msg the message to be included in the packet to be sent to the client.
 	 * @throws IOException
 	 */
-	public static void sendMessage(String msg) throws IOException 
+	private static void sendMessage(String msg) throws IOException 
 	{
 		msg = buildMessage(msg);
 		buf = new byte[BUFFER_SIZE];
 		buf = msg.getBytes();
 		DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
 		
-		System.out.println("Sending packet of size: " + packet.getLength());
-		averagePacketSentSize += packet.getLength();
-		System.out.println("Average size of packets sent: " + averagePacketSentSize);
+		System.out.println("*Sending packet of size: " + packet.getLength());
+		excelRowIndex = startingRowIndex + 2;
+        writeToExcelCell(String.valueOf(packet.getLength()));
+		packetSentSize = packet.getLength();
+		System.out.println("Size of packets sent: " + packetSentSize);
 		
 		socket.send(packet);
 	}
@@ -521,8 +603,12 @@ public class Broker
 //				long stopTime = System.nanoTime();// stop timer
 //				long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //				long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//				System.out.println("Memory used during decryption: " + actualUsedMemory + " bytes");
-//				System.out.println("Message decryption time: " + (stopTime - startTime) + "ns");
+//				System.out.println("*Memory usage change during decryption: " + actualUsedMemory + " bytes");
+//				excelRowIndex = startingRowIndex + 5;
+//				writeToExcelCell(String.valueOf(actualUsedMemory));
+//				System.out.println("*Message decryption time: " + (stopTime - startTime) + "ns");
+//				excelRowIndex = startingRowIndex + 1;
+//				writeToExcelCell(String.valueOf(stopTime - startTime));
 //				averageDecryptionTime += (stopTime - startTime) / decryptionCount;
 //				System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
 //
@@ -537,6 +623,7 @@ public class Broker
 //
 //			if(clientName.equals("Broker"))
 //			{
+//				command = message;
 //				ProcessCommand(message, senderName);
 //			}
 //		}
@@ -571,11 +658,14 @@ public class Broker
 //				long stopTime = System.nanoTime();// stop timer
 //				long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //				long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//				System.out.println("Memory used during decryption: " + actualUsedMemory + " bytes");
-//				System.out.println("Message decryption time: " + (stopTime - startTime) + "ns");
+//				System.out.println("*Memory usage change during decryption: " + actualUsedMemory + " bytes");
+//				excelRowIndex = startingRowIndex + 5;
+//				writeToExcelCell(String.valueOf(actualUsedMemory));
+//				System.out.println("*Message decryption time: " + (stopTime - startTime) + "ns");
+//				excelRowIndex = startingRowIndex + 1;
+//				writeToExcelCell(String.valueOf(stopTime - startTime));
 //				averageDecryptionTime += (stopTime - startTime) / decryptionCount;
 //				System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
-//				
 //				System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
 //			}
 //
@@ -587,6 +677,7 @@ public class Broker
 //
 //			if(clientName.equals("Broker"))
 //			{
+//				command = message;
 //				ProcessCommand(message, senderName);
 //			}
 //		}
@@ -598,6 +689,61 @@ public class Broker
 //	}
 
 	//CGH
+//	public static void ProcessResponse(String message, String senderName, byte[] hmacSignature, byte[] messageSignature, PublicKey pubKey) throws Exception
+//	{
+//		String decryptedData = "";
+//		++decryptionCount;
+//
+//		System.out.println("Message received by " + clientName + ": " + message);
+//
+//		//verify digital signature
+//		if(Verify_Digital_Signature(message.getBytes(), messageSignature, pubKey))
+//		{
+//			System.out.println("Digital signature verified :)");
+//
+//			long beforeUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+//			long startTime = System.nanoTime();//start timer
+//
+//			message = CCMP_Decrypt(message, cipherBlockChainKey);
+//			System.out.println("Decrypted Cipher Block Chain: " + message);
+//			decryptedData = decrypt(message);
+//
+//			if(isMessageAuthentic(decryptedData, hmacSignature))
+//			{				
+//				long stopTime = System.nanoTime();// stop timer
+//				long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+//				long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
+//				System.out.println("*Memory usage change during decryption: " + actualUsedMemory + " bytes");
+//				excelRowIndex = startingRowIndex + 5;
+//				writeToExcelCell(String.valueOf(actualUsedMemory));
+//				System.out.println("*Message decryption time: " + (stopTime - startTime) + "ns");
+//				excelRowIndex = startingRowIndex + 1;
+//				writeToExcelCell(String.valueOf(stopTime - startTime));
+//				averageDecryptionTime += (stopTime - startTime) / decryptionCount;
+//				System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
+//				System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
+//			}
+//
+//			else
+//			{
+//				System.out.println("Message discarded!");
+//				decryptedData = "0";
+//			}
+//
+//			if(clientName.equals("Broker"))
+//			{
+//				command = decryptedData;
+//				ProcessCommand(decryptedData, senderName);
+//			}
+//		}
+//
+//		else
+//		{
+//			System.out.println("Digital signature could not be verified");
+//		}
+//	}
+		
+		//CHG
 //		public static void ProcessResponse(String message, String senderName, byte[] hmacSignature, byte[] messageSignature, PublicKey pubKey) throws Exception
 //		{
 //			String decryptedData = "";
@@ -608,26 +754,28 @@ public class Broker
 //			//verify digital signature
 //			if(Verify_Digital_Signature(message.getBytes(), messageSignature, pubKey))
 //			{
+//				long beforeUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //				System.out.println("Digital signature verified :)");
 //				
-//				long beforeUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //				long startTime = System.nanoTime();//start timer
 //
 //				message = CCMP_Decrypt(message, cipherBlockChainKey);
 //				System.out.println("Decrypted Cipher Block Chain: " + message);
-//				decryptedData = decrypt(message);
 //
-//				if(isMessageAuthentic(decryptedData, hmacSignature))
-//				{				
-//					
-//					long stopTime = System.nanoTime();// stop timer
+//				if(isMessageAuthentic(message, hmacSignature))
+//				{	
+//					decryptedData = decrypt(message);
 //					long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //					long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//					System.out.println("Memory used during decryption: " + actualUsedMemory + " bytes");
-//					System.out.println("Message decryption time: " + (stopTime - startTime) + "ns");
+//					long stopTime = System.nanoTime();// stop timer
+//					System.out.println("*Memory usage change during decryption: " + actualUsedMemory + " bytes");
+//					excelRowIndex = startingRowIndex + 5;
+//					writeToExcelCell(String.valueOf(actualUsedMemory));
+//					System.out.println("*Message decryption time: " + (stopTime - startTime) + "ns");
+//					excelRowIndex = startingRowIndex + 1;
+//					writeToExcelCell(String.valueOf(stopTime - startTime));
 //					averageDecryptionTime += (stopTime - startTime) / decryptionCount;
 //					System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
-//					
 //					System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
 //				}
 //
@@ -639,6 +787,7 @@ public class Broker
 //
 //				if(clientName.equals("Broker"))
 //				{
+//					command = decryptedData;
 //					ProcessCommand(decryptedData, senderName);
 //				}
 //			}
@@ -649,7 +798,7 @@ public class Broker
 //			}
 //		}
 		
-		//CHG
+		//HCG
 		public static void ProcessResponse(String message, String senderName, byte[] hmacSignature, byte[] messageSignature, PublicKey pubKey) throws Exception
 		{
 			String decryptedData = "";
@@ -662,19 +811,26 @@ public class Broker
 			{
 				System.out.println("Digital signature verified :)");
 				
+				long beforeUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 				long startTime = System.nanoTime();//start timer
 
-				message = CCMP_Decrypt(message, cipherBlockChainKey);
-				System.out.println("Decrypted Cipher Block Chain: " + message);
-
 				if(isMessageAuthentic(message, hmacSignature))
-				{	
-					decryptedData = decrypt(message);					
+				{
+					message = CCMP_Decrypt(message, cipherBlockChainKey);
+					System.out.println("Decrypted Cipher Block Chain: " + message);
+					decryptedData = decrypt(message);	
+					
 					long stopTime = System.nanoTime();// stop timer
-					System.out.println("Message decryption time: " + (stopTime - startTime) + "ns");
+					long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+					long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
+					System.out.println("*Memory usage change during decryption: " + actualUsedMemory + " bytes");
+					excelRowIndex = startingRowIndex + 5;
+					writeToExcelCell(String.valueOf(actualUsedMemory));
+					System.out.println("*Message decryption time: " + (stopTime - startTime) + "ns");
+					excelRowIndex = startingRowIndex + 1;
+					writeToExcelCell(String.valueOf(stopTime - startTime));
 					averageDecryptionTime += (stopTime - startTime) / decryptionCount;
 					System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
-					
 					System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
 				}
 
@@ -686,6 +842,7 @@ public class Broker
 
 				if(clientName.equals("Broker"))
 				{
+					command = decryptedData;
 					ProcessCommand(decryptedData, senderName);
 				}
 			}
@@ -695,57 +852,6 @@ public class Broker
 				System.out.println("Digital signature could not be verified");
 			}
 		}
-		
-		//HCG
-//		public static void ProcessResponse(String message, String senderName, byte[] hmacSignature, byte[] messageSignature, PublicKey pubKey) throws Exception
-//		{
-//			String decryptedData = "";
-//			++decryptionCount;
-//
-//			System.out.println("Message received by " + clientName + ": " + message);
-//
-//			//verify digital signature
-//			if(Verify_Digital_Signature(message.getBytes(), messageSignature, pubKey))
-//			{
-//				System.out.println("Digital signature verified :)");
-//				
-//				long beforeUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-//				long startTime = System.nanoTime();//start timer
-//
-//				if(isMessageAuthentic(message, hmacSignature))
-//				{
-//					message = CCMP_Decrypt(message, cipherBlockChainKey);
-//					System.out.println("Decrypted Cipher Block Chain: " + message);
-//					decryptedData = decrypt(message);	
-//					
-//					long stopTime = System.nanoTime();// stop timer
-//					long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-//					long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//					System.out.println("Memory used during decryption: " + actualUsedMemory + " bytes");
-//					System.out.println("Message decryption time: " + (stopTime - startTime) + "ns");
-//					averageDecryptionTime += (stopTime - startTime) / decryptionCount;
-//					System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
-//					
-//					System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
-//				}
-//
-//				else
-//				{
-//					System.out.println("Message discarded!");
-//					decryptedData = "0";
-//				}
-//
-//				if(clientName.equals("Broker"))
-//				{
-//					ProcessCommand(decryptedData, senderName);
-//				}
-//			}
-//			
-//			else
-//			{
-//				System.out.println("Digital signature could not be verified");
-//			}
-//		}
 	
 	//HGC
 //	public static void ProcessResponse(String message, String senderName, byte[] hmacSignature, byte[] messageSignature, PublicKey pubKey) throws Exception
@@ -772,11 +878,14 @@ public class Broker
 //				long stopTime = System.nanoTime();// stop timer
 //				long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //				long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//				System.out.println("Memory used during decryption: " + actualUsedMemory + " bytes");
-//				System.out.println("Message decryption time: " + (stopTime - startTime) + "ns");
+//				System.out.println("*Memory usage change during decryption: " + actualUsedMemory + " bytes");
+//				excelRowIndex = startingRowIndex + 5;
+//				writeToExcelCell(String.valueOf(actualUsedMemory));
+//				System.out.println("*Message decryption time: " + (stopTime - startTime) + "ns");
+//				excelRowIndex = startingRowIndex + 1;
+//				writeToExcelCell(String.valueOf(stopTime - startTime));
 //				averageDecryptionTime += (stopTime - startTime) / decryptionCount;
 //				System.out.println("Average message decryption time over " + decryptionCount + " decryptions: " + averageDecryptionTime + "ns");
-//				
 //				System.out.println("Decrypted AES-GCM message by " + clientName + ": " + decryptedData);
 //			}
 //
@@ -788,6 +897,7 @@ public class Broker
 //
 //			if(clientName.equals("Broker"))
 //			{
+//				command = message;
 //				ProcessCommand(message, senderName);
 //			}
 //		}
@@ -1364,29 +1474,6 @@ public class Broker
 	 * where GHC stands for (GCM encryption, followed by HMAC verification, followed by CCMP encryption). ***************************/
 
 	//GHC
-	private static String ThreeLayerEncryption(String message) throws InvalidKeyException, NoSuchAlgorithmException, Exception
-	{
-		String CCMP_encryptedMessage = "";
-		++encryptionCount;
-		long beforeUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-		long startTime = System.nanoTime();
-		
-		encryptedMessage = Encrypt(message);//AES-GCM
-		HMAC_Sign(encryptedMessage);//HMAC
-		CCMP_encryptedMessage = CCMP_Encrypt(encryptedMessage, cipherBlockChainKey);//CCMP
-		
-		long stopTime = System.nanoTime();
-		long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-		long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-		System.out.println("Memory used during encryption: " + actualUsedMemory + " bytes");
-		System.out.println("Message encryption time: " + (stopTime - startTime) + "ns");
-		averageEncryptionTime += (stopTime - startTime) / encryptionCount;
-		System.out.println("Average message encryption time over " + encryptionCount + " encryptions: " + averageEncryptionTime + "ns");
-		
-		return CCMP_encryptedMessage;
-	}
-	
-	//GCH
 //	private static String ThreeLayerEncryption(String message) throws InvalidKeyException, NoSuchAlgorithmException, Exception
 //	{
 //		String CCMP_encryptedMessage = "";
@@ -1395,20 +1482,55 @@ public class Broker
 //		long startTime = System.nanoTime();
 //		
 //		encryptedMessage = Encrypt(message);//AES-GCM
-//		CCMP_encryptedMessage = CCMP_Encrypt(encryptedMessage, cipherBlockChainKey);
-//		HMAC_Sign(CCMP_encryptedMessage);
-//
+//		HMAC_Sign(encryptedMessage);//HMAC
+//		CCMP_encryptedMessage = CCMP_Encrypt(encryptedMessage, cipherBlockChainKey);//CCMP
 //		
 //		long stopTime = System.nanoTime();
 //		long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //		long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//		System.out.println("Memory used during encryption: " + actualUsedMemory + " bytes");
-//		System.out.println("Message encryption time: " + (stopTime - startTime) + "ns");
+//		System.out.println("*Memory usage change during encryption: " + actualUsedMemory + " bytes");
+//		excelRowIndex = startingRowIndex + 4;
+//		writeToExcelCell(String.valueOf(actualUsedMemory));
+//		System.out.println("*Message encryption time: " + (stopTime - startTime) + "ns");
+//		excelRowIndex = startingRowIndex;
+//		writeToExcelCell(String.valueOf(stopTime - startTime));
 //		averageEncryptionTime += (stopTime - startTime) / encryptionCount;
 //		System.out.println("Average message encryption time over " + encryptionCount + " encryptions: " + averageEncryptionTime + "ns");
 //		
+//		if(command.equals("2")) excelColumnIndex++;
+//		
 //		return CCMP_encryptedMessage;
 //	}
+	
+	//GCH
+	private static String ThreeLayerEncryption(String message) throws InvalidKeyException, NoSuchAlgorithmException, Exception
+	{
+		String CCMP_encryptedMessage = "";
+		++encryptionCount;
+		long beforeUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+		long startTime = System.nanoTime();
+		
+		encryptedMessage = Encrypt(message);//AES-GCM
+		CCMP_encryptedMessage = CCMP_Encrypt(encryptedMessage, cipherBlockChainKey);
+		HMAC_Sign(CCMP_encryptedMessage);
+
+		
+		long stopTime = System.nanoTime();
+		long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+		long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
+		System.out.println("*Memory usage change during encryption: " + actualUsedMemory + " bytes");
+		excelRowIndex = startingRowIndex + 4;
+		writeToExcelCell(String.valueOf(actualUsedMemory));
+		System.out.println("*Message encryption time: " + (stopTime - startTime) + "ns");
+		excelRowIndex = startingRowIndex;
+		writeToExcelCell(String.valueOf(stopTime - startTime));
+		averageEncryptionTime += (stopTime - startTime) / encryptionCount;
+		System.out.println("Average message encryption time over " + encryptionCount + " encryptions: " + averageEncryptionTime + "ns");
+		
+		if(command.equals("2")) excelColumnIndex++;
+		
+		return CCMP_encryptedMessage;
+	}
 	
 	//CGH
 //	private static String ThreeLayerEncryption(String message) throws InvalidKeyException, NoSuchAlgorithmException, Exception
@@ -1427,10 +1549,16 @@ public class Broker
 //		long stopTime = System.nanoTime();
 //		long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //		long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//		System.out.println("Memory used during encryption: " + actualUsedMemory + " bytes");
-//		System.out.println("Message encryption time: " + (stopTime - startTime) + "ns");
+//		System.out.println("*Memory usage change during encryption: " + actualUsedMemory + " bytes");
+//		excelRowIndex = startingRowIndex + 4;
+//		writeToExcelCell(String.valueOf(actualUsedMemory));
+//		System.out.println("*Message encryption time: " + (stopTime - startTime) + "ns");
+//		excelRowIndex = startingRowIndex;
+//		writeToExcelCell(String.valueOf(stopTime - startTime));
 //		averageEncryptionTime += (stopTime - startTime) / encryptionCount;
 //		System.out.println("Average message encryption time over " + encryptionCount + " encryptions: " + averageEncryptionTime + "ns");
+//		
+//		if(command.equals("2")) excelColumnIndex++;
 //		
 //		return encryptedMessage;
 //	}
@@ -1451,10 +1579,16 @@ public class Broker
 //		long stopTime = System.nanoTime();
 //		long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //		long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//		System.out.println("Memory used during encryption: " + actualUsedMemory + " bytes");
-//		System.out.println("Message encryption time: " + (stopTime - startTime) + "ns");
+//		System.out.println("*Memory usage change during encryption: " + actualUsedMemory + " bytes");
+//		excelRowIndex = startingRowIndex + 4;
+//		writeToExcelCell(String.valueOf(actualUsedMemory));
+//		System.out.println("*Message encryption time: " + (stopTime - startTime) + "ns");
+//		excelRowIndex = startingRowIndex;
+//		writeToExcelCell(String.valueOf(stopTime - startTime));
 //		averageEncryptionTime += (stopTime - startTime) / encryptionCount;
 //		System.out.println("Average message encryption time over " + encryptionCount + " encryptions: " + averageEncryptionTime + "ns");
+//		
+//		if(command.equals("2")) excelColumnIndex++;
 //		
 //		return encryptedMessage;
 //	}
@@ -1475,10 +1609,16 @@ public class Broker
 //		long stopTime = System.nanoTime();
 //		long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //		long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//		System.out.println("Memory used during encryption: " + actualUsedMemory + " bytes");
-//		System.out.println("Message encryption time: " + (stopTime - startTime) + "ns");
+//		System.out.println("*Memory usage change during encryption: " + actualUsedMemory + " bytes");
+//		excelRowIndex = startingRowIndex + 4;
+//		writeToExcelCell(String.valueOf(actualUsedMemory));
+//		System.out.println("*Message encryption time: " + (stopTime - startTime) + "ns");
+//		excelRowIndex = startingRowIndex;
+//		writeToExcelCell(String.valueOf(stopTime - startTime));
 //		averageEncryptionTime += (stopTime - startTime) / encryptionCount;
 //		System.out.println("Average message encryption time over " + encryptionCount + " encryptions: " + averageEncryptionTime + "ns");
+//		
+//		if(command.equals("2")) excelColumnIndex++;
 //		
 //		return encryptedMessage;
 //	}
@@ -1499,10 +1639,16 @@ public class Broker
 //		long stopTime = System.nanoTime();
 //		long afterUsedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
 //		long actualUsedMemory = afterUsedMemory - beforeUsedMemory;
-//		System.out.println("Memory used during encryption: " + actualUsedMemory + " bytes");
-//		System.out.println("Message encryption time: " + (stopTime - startTime) + "ns");
+//		System.out.println("*Memory usage change during encryption: " + actualUsedMemory + " bytes");
+//		excelRowIndex = startingRowIndex + 4;
+//		writeToExcelCell(String.valueOf(actualUsedMemory));
+//		System.out.println("*Message encryption time: " + (stopTime - startTime) + "ns");
+//		excelRowIndex = startingRowIndex;
+//		writeToExcelCell(String.valueOf(stopTime - startTime));
 //		averageEncryptionTime += (stopTime - startTime) / encryptionCount;
 //		System.out.println("Average message encryption time over " + encryptionCount + " encryptions: " + averageEncryptionTime + "ns");
+//		
+//		if(command.equals("2")) excelColumnIndex++;
 //		
 //		return CCMP_encryptedMessage;
 //	}
