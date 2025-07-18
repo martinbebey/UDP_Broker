@@ -1,0 +1,7 @@
+user:admin balance:4915.5
+ticker	price	qty
+emu 	$2.3 	33
+dtw 	$12.1 	41
+ypsi 	$0.2 	2
+MSc 	$4.0 	8 
+prayH 	$7.0 	16

@@ -5,7 +5,7 @@
 			<attribute name="module" value="true"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="src" path=""/>
+	<classpathentry kind="src" path="src"/>
 	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/mysql-connector-j-9.1.0/mysql-connector-j-9.1.0.jar">
 		<attributes>
 			<attribute name="module" value="true"/>
@@ -47,5 +47,5 @@
 	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/poi-bin-5.2.3-20220909/poi-bin-5.2.3/poi-scratchpad-5.2.3.jar"/>
 	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/poi-bin-5.2.3-20220909/poi-bin-5.2.3/poi-ooxml-full-5.2.3.jar"/>
 	<classpathentry kind="lib" path="C:/Users/betoc/Downloads/poi-bin-5.2.3-20220909/poi-bin-5.2.3/ooxml-lib/xmlbeans-5.1.1.jar"/>
-	<classpathentry kind="output" path=""/>
+	<classpathentry kind="output" path="bin"/>
 </classpath>

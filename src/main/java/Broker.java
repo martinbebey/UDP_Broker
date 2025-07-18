@@ -1,8 +1,7 @@
-package src.main.java;
+package main.java;
 
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.Inet4Address;
@@ -32,6 +31,7 @@ import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Enumeration;
+import java.util.Properties;
 import java.util.concurrent.ThreadLocalRandom;
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
@@ -43,6 +43,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.xmlbeans.GDurationBuilder;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -96,9 +97,9 @@ public class Broker
 	public static int P; //used for DH key exchange
 	public static int G; //used for DH key exchange
 	public static int publicValue;
-    private static String dbUrl = "jdbc:mysql://localhost:3306/myDB";
-    private static String dbUsername = "root";
-    private static String dbPassword = "123";
+    private static String dbUrl = ""; //"jdbc:mysql://localhost:3306/myDB";
+    private static String dbUsername = ""; //"root";
+    private static String dbPassword = ""; //"123";
     private static String command = "";
 
 
@@ -113,6 +114,26 @@ public class Broker
 		boolean running = true;
 		
 		printInetAddress();
+		
+		try (InputStream resource = Broker.class.getClassLoader().getResourceAsStream("db.properties")) 
+		{
+            if (resource == null) 
+            {
+                System.out.println("Sorry, unable to resolve DB credentials");
+                return;
+            }
+
+            Properties properties = new Properties();
+            properties.load(resource);
+
+            dbUrl = new String(Base64.getDecoder().decode(properties.getProperty("db.url")), StandardCharsets.UTF_8);
+            dbUsername = new String(Base64.getDecoder().decode(properties.getProperty("db.user")), StandardCharsets.UTF_8);
+            dbPassword = new String(Base64.getDecoder().decode(properties.getProperty("db.pwd")), StandardCharsets.UTF_8);
+        } 
+		catch (Exception ex) 
+		{
+            ex.printStackTrace();
+        }
 		
 		//P & G for DH 
 		DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -208,6 +229,9 @@ public class Broker
 		socket.close();
 	}
 	
+	/**
+	 * Prints the IP address of the broker machine. The client can use this IP to connect to the broker.
+	 */
 	private static void printInetAddress() {
 		try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
@@ -234,38 +258,34 @@ public class Broker
 	}
 	
 	/**
-     * Writes a string value into a specific cell of an Excel (.xlsx) file.
-     *
-     * @param excelFilePath Full path to the Excel file (e.g. "C:\\Users\\you\\Desktop\\file.xlsx")
-     * @param excelRowIndex      Row number (0-based)
-     * @param excelColumnIndex      Column number (0-based)
-     * @param value         The string to write
+     * Writes a string value into a specific cell of an Excel (.xlsx) file. This is used for data collection.
+     * @param value The string to write into the excel file
      */
 	private static void writeToExcelCell(String value) {
-		if(command.equals("2")) {
-			try (FileInputStream fis = new FileInputStream(excelFilePath);
-					Workbook workbook = new XSSFWorkbook(fis)) {
-
-				Sheet sheet = workbook.getSheetAt(0); // get first sheet
-				Row row = ((org.apache.poi.ss.usermodel.Sheet) sheet).getRow(excelRowIndex);
-				if (row == null) row = sheet.createRow(excelRowIndex);
-
-				Cell cell = row.getCell(excelColumnIndex);
-				if (cell == null) cell = row.createCell(excelColumnIndex);
-
-				cell.setCellValue(value);
-
-				fis.close(); // close input stream before writing
-
-				try (FileOutputStream fos = new FileOutputStream(excelFilePath)) {
-					workbook.write(fos);
-					System.out.println("Value written to Excel: " + value);
-				}
-
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
+//		if(command.equals("2")) {
+//			try (FileInputStream fis = new FileInputStream(excelFilePath);
+//					Workbook workbook = new XSSFWorkbook(fis)) {
+//
+//				Sheet sheet = workbook.getSheetAt(0); // get first sheet
+//				Row row = ((org.apache.poi.ss.usermodel.Sheet) sheet).getRow(excelRowIndex);
+//				if (row == null) row = sheet.createRow(excelRowIndex);
+//
+//				Cell cell = row.getCell(excelColumnIndex);
+//				if (cell == null) cell = row.createCell(excelColumnIndex);
+//
+//				cell.setCellValue(value);
+//
+//				fis.close(); // close input stream before writing
+//
+//				try (FileOutputStream fos = new FileOutputStream(excelFilePath)) {
+//					workbook.write(fos);
+//					System.out.println("Value written to Excel: " + value);
+//				}
+//
+//			} catch (IOException e) {
+//				e.printStackTrace();
+//			}
+//		}
 	}
 	
 	/**
@@ -495,7 +515,7 @@ public class Broker
 		encryptionCipher = Cipher.getInstance("AES/GCM/NoPadding");
 		encryptionCipher.init(Cipher.ENCRYPT_MODE, key);
 		byte[] encryptedBytes = encryptionCipher.doFinal(dataInBytes);
-		return encode(encryptedBytes);
+		return Base64.getEncoder().encodeToString(encryptedBytes);
 	}
 
 	/**
@@ -505,7 +525,7 @@ public class Broker
 	 */
 	public static String decrypt(String encryptedData) throws Exception 
 	{     
-		byte[] dataInBytes = decode(encryptedData);
+		byte[] dataInBytes = Base64.getDecoder().decode(encryptedData);
 		Cipher decryptionCipher = Cipher.getInstance("AES/GCM/NoPadding");
 		GCMParameterSpec spec = new GCMParameterSpec(DATA_LENGTH, initVector);
 		System.out.println("iv: " + initVector);
@@ -1691,23 +1711,5 @@ public class Broker
 		str += str;
 		System.out.println("AES key string: " + str);
 		key = new SecretKeySpec(str.getBytes(), "AES");
-	}
-
-	/**
-	 * Base 64 encodes a byte of data into a string.
-	 * @param data - the byte to be encoded
-	 */
-	private static String encode(byte[] data) 
-	{
-		return Base64.getEncoder().encodeToString(data);
-	}
-
-	/**
-	 * Base 64 decodes a string of data into a byte.
-	 * @param data - the string to be decoded
-	 */
-	private static byte[] decode(String data) 
-	{
-		return Base64.getDecoder().decode(data);
 	}
 }
