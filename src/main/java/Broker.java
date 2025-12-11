@@ -199,7 +199,7 @@ public class Broker
 			socket.receive(packet);
 			InetAddress address = packet.getAddress();
 			port = packet.getPort();
-			packet = new DatagramPacket(buffer, buffer.length, address, port);
+//			packet = new DatagramPacket(buffer, buffer.length, address, port);
 			received = new String(packet.getData(), 0, packet.getLength());
 			System.out.println("*Receiving packet of size: " + packet.getLength());
 			excelRowIndex = startingRowIndex + 3;
@@ -208,22 +208,30 @@ public class Broker
 			System.out.println("Size of packets received: " + packetReceivedSize);	
 			System.out.println("Received: " + received);
 			
-			//breakdown response
-			String encryptedResponse = received.split("\\|")[0];
-			String senderName = received.split("\\|")[1];
-			byte[] userHMACSignature = Base64.getDecoder().decode(received.split("\\|")[2].getBytes());
-			byte[] userDigitalSignature = Base64.getDecoder().decode(received.split("\\|")[3].getBytes());
-			System.out.println("received iv string: " + received.split("\\|")[5].trim().substring(0, 16));
-			initVector = Base64.getDecoder().decode(received.split("\\|")[5].trim().substring(0, 16).getBytes());
-			System.out.println(clientName + " received HMAC signature: " + received.split("\\|")[2]);
-			System.out.println(clientName + " received DS signature: " + received.split("\\|")[3]);	
-			KeyFactory factory = KeyFactory.getInstance("DSA");
-			String keyString = received.split("\\|")[4];
-			byte[] keyByte = Base64.getDecoder().decode(keyString.trim());
-			PublicKey brokerPublicKeyDS = (PublicKey) factory.generatePublic(new X509EncodedKeySpec(keyByte));
-			
-			//process response
-			ProcessResponse(encryptedResponse, senderName, userHMACSignature, userDigitalSignature, brokerPublicKeyDS);
+			try 
+			{			
+				//breakdown response
+				String encryptedResponse = received.split("\\|")[0];
+				String senderName = received.split("\\|")[1];
+				byte[] userHMACSignature = Base64.getDecoder().decode(received.split("\\|")[2].getBytes());
+				byte[] userDigitalSignature = Base64.getDecoder().decode(received.split("\\|")[3].getBytes());
+				System.out.println("received iv string: " + received.split("\\|")[5].trim().substring(0, 16));
+				initVector = Base64.getDecoder().decode(received.split("\\|")[5].trim().substring(0, 16).getBytes());
+				System.out.println(clientName + " received HMAC signature: " + received.split("\\|")[2]);
+				System.out.println(clientName + " received DS signature: " + received.split("\\|")[3]);	
+				KeyFactory factory = KeyFactory.getInstance("DSA");
+				String keyString = received.split("\\|")[4];
+				byte[] keyByte = Base64.getDecoder().decode(keyString.trim());
+				PublicKey brokerPublicKeyDS = (PublicKey) factory.generatePublic(new X509EncodedKeySpec(keyByte));
+
+				//process response
+				ProcessResponse(encryptedResponse, senderName, userHMACSignature, userDigitalSignature, brokerPublicKeyDS);
+			}
+			catch(Exception exception) 
+			{
+//				exception.printStackTrace();
+				System.out.println("Could not process input");
+			}
 		}
 
 		socket.close();
@@ -1160,7 +1168,7 @@ public class Broker
                 }
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+//            e.printStackTrace();
             feedback = "Error fetching data from the database.";
         }
         
@@ -1190,7 +1198,7 @@ public class Broker
                 System.out.println("Could not find the price for " + ticker);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+//            e.printStackTrace();
             System.out.println("Error fetching stock price for " + ticker);
         }
         
@@ -1242,7 +1250,7 @@ public class Broker
                 stockStmt.setString(2, tickerToBuy); // Set the ticker from the buyInfo
                 ResultSet stockResult = stockStmt.executeQuery();
 
-                int currentStockQuantity = 0;
+                int currentStockQuantity = -1;
 
                 if (stockResult.next()) {
                     currentStockQuantity = stockResult.getInt("quantity");
@@ -1258,7 +1266,7 @@ public class Broker
 
                 // Check if the stock already exists for the user, then update or insert
                 String updateStockQuery;
-                if (currentStockQuantity > 0) {
+                if (currentStockQuantity > -1) {
                     // Update the stock quantity and price if the user already has this stock
                     updateStockQuery = "UPDATE stocks SET quantity = ?, price = ? WHERE username = ? AND ticker = ?";
                     PreparedStatement updateStockStmt = conn.prepareStatement(updateStockQuery);
